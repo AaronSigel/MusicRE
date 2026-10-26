@@ -74,28 +74,37 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
     group_audio: Dict[str, np.ndarray] = {}
     group_notes: Dict[str, list] = {g: [] for g in GROUPS}
     group_note_counts: Dict[str, int] = {g: 0 for g in GROUPS}
+    warnings: list = []
 
     for stem_id, info in metadata["stems"].items():
         group = classify_stem(info["inst_class"], bool(info.get("is_drum", False)))
 
+        # metadata.yaml's audio_rendered flag is unreliable in practice
+        # (BabySlakh's own Track00020 marks every stem False yet ships the
+        # wavs); existence on disk is the only check we trust. A stem with
+        # no audio still has notes describing the composition, so skip only
+        # the audio contribution, not the whole stem.
         stem_wav = track_dir / "stems" / f"{stem_id}.wav"
-        y, _ = decode_audio(stem_wav, target_sr=sr, normalize_db=None)
-        y_mono = y if y.ndim == 1 else y.mean(axis=1)
+        if stem_wav.is_file():
+            y, _ = decode_audio(stem_wav, target_sr=sr, normalize_db=None)
+            y_mono = y if y.ndim == 1 else y.mean(axis=1)
 
-        diff = len(y_mono) - n_samples
-        if abs(diff) > tolerance_samples:
-            raise ValueError(
-                f"{track_id}/{stem_id}: audio/MIDI alignment check failed "
-                f"({len(y_mono)} samples vs mix's {n_samples} samples, "
-                f"tolerance {tolerance_samples} samples)"
-            )
-        if diff < 0:
-            y_mono = np.pad(y_mono, (0, -diff))
-        elif diff > 0:
-            y_mono = y_mono[:n_samples]
+            diff = len(y_mono) - n_samples
+            if abs(diff) > tolerance_samples:
+                raise ValueError(
+                    f"{track_id}/{stem_id}: audio/MIDI alignment check failed "
+                    f"({len(y_mono)} samples vs mix's {n_samples} samples, "
+                    f"tolerance {tolerance_samples} samples)"
+                )
+            if diff < 0:
+                y_mono = np.pad(y_mono, (0, -diff))
+            elif diff > 0:
+                y_mono = y_mono[:n_samples]
 
-        buffer = group_audio.get(group)
-        group_audio[group] = y_mono.copy() if buffer is None else buffer + y_mono
+            buffer = group_audio.get(group)
+            group_audio[group] = y_mono.copy() if buffer is None else buffer + y_mono
+        else:
+            warnings.append(f"{stem_id}: audio file missing, kept MIDI notes without audio contribution")
 
         stem_midi_path = track_dir / "MIDI" / f"{stem_id}.mid"
         if stem_midi_path.exists():
@@ -108,7 +117,10 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
     gt_stems_dir = out_dir / "ground_truth_stems"
     gt_stems_dir.mkdir(parents=True, exist_ok=True)
     for group, audio in group_audio.items():
-        sf.write(str(gt_stems_dir / f"{group}.wav"), audio, sr)
+        # Demucs always outputs 2-channel stems (channels=2 in
+        # demucs_backend.py); duplicate mono Slakh audio to stereo so
+        # separation_quality's shape check matches and SDR gets computed.
+        sf.write(str(gt_stems_dir / f"{group}.wav"), np.stack([audio, audio], axis=-1), sr)
 
     gt_pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
     max_note_end = 0.0
@@ -136,4 +148,5 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
         "ground_truth_stems_dir": str(gt_stems_dir),
         "ground_truth_midi_path": str(gt_midi_path),
         "group_note_counts": group_note_counts,
+        "warnings": warnings,
     }

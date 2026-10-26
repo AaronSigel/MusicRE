@@ -99,7 +99,23 @@ def test_drum_class_breakdown_scores_kick_snare_separately(tmp_path):
     assert metrics['drums_by_class']['kick']['f1'] == 1.0
     assert metrics['drums_by_class']['snare']['f1'] == 0.0
     assert metrics['drums_by_class']['hihat']['f1'] == 0.0
-    assert 'crash' not in metrics['drums_by_class']  # not present: zero notes either side
+
+
+def test_drum_class_breakdown_counts_other_gm_kit_pitches_in_each_class(tmp_path):
+    # Review I4: real Slakh drum MIDI uses the full GM kit (e.g. kick 35,
+    # not just 36). A note at a GM variant pitch must still be scored
+    # within its class, not silently excluded from every class because it
+    # fails an exact match against only {36, 38, 42}. If pitch 35 isn't
+    # recognized as a kick at all, 'kick' is absent from drums_by_class
+    # here (both sides are empty at pitch 36 exactly) -- that absence is
+    # exactly what would wrongly hide this reference note from scoring.
+    reference, estimate = tmp_path / 'ref2.mid', tmp_path / 'est2.mid'
+    write_drum_note(reference, pitch=35, start=0.0)  # GM "Acoustic Bass Drum", same class as kick
+    write_drum_note(estimate, pitch=35, start=0.0)    # matches exactly
+
+    metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
+
+    assert metrics['drums_by_class']['kick']['f1'] == 1.0
 
 
 def test_silent_reference_is_unavailable(quality_workspace, tmp_path):

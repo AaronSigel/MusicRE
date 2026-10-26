@@ -4,10 +4,17 @@ import mir_eval
 import numpy as np
 import pretty_midi
 
-# Mirrors the GM drum pitches drum_backend.py's DrumTranscriber already emits
-# (kick/snare/hihat bands), so the breakdown below scores the same classes
-# the current drum pipeline actually produces.
-DRUM_GM_PITCH_CLASSES = {'kick': 36, 'snare': 38, 'hihat': 42}
+# drum_backend.py's DrumTranscriber always emits exactly pitch 36/38/42
+# (kick/snare/hihat), but a Slakh ground-truth reference uses the full GM
+# drum kit, where the same class has several valid pitches (e.g. kick 35
+# "Acoustic Bass Drum" as well as 36). Score each class against every GM
+# pitch that belongs to it, or a reference note at pitch 35 would simply
+# vanish from every class instead of counting as a class member.
+DRUM_GM_PITCH_CLASSES = {
+    'kick': {35, 36},
+    'snare': {37, 38, 40},
+    'hihat': {42, 44, 46},
+}
 
 
 def _notes(pm, drums):
@@ -69,9 +76,9 @@ def transcription_quality(midis, ground_truth=None):
             metrics[key] = group
             if drums:
                 by_class = {}
-                for name, pitch in DRUM_GM_PITCH_CLASSES.items():
-                    ref_class = [n for n in ref_notes if n.pitch == pitch]
-                    est_class = [n for n in est_notes if n.pitch == pitch]
+                for name, pitches in DRUM_GM_PITCH_CLASSES.items():
+                    ref_class = [n for n in ref_notes if n.pitch in pitches]
+                    est_class = [n for n in est_notes if n.pitch in pitches]
                     if not ref_class and not est_class:
                         continue
                     by_class[name] = _score(ref_class, est_class, offsets=False)

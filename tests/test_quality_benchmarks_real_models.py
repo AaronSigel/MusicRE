@@ -25,3 +25,6 @@ def test_benchmark_one_synthetic_track_end_to_end(tmp_path):
 
     assert results[0]["error"] is None
     assert results[0]["quality_report"]["is_objective"] is True
+    # Review C2: ground-truth stems must be stereo (Demucs' fixed output
+    # shape) or separation_quality silently never compares anything.
+    assert results[0]["quality_report"]["separation_metrics"]["comparisons"] > 0

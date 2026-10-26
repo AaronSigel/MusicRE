@@ -1,12 +1,64 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from music_re.schemas import QualityReport
-from scripts.run_quality_benchmarks import render_markdown_report, run_reference_benchmarks
+from scripts.run_quality_benchmarks import (
+    _fresh_cache_root, _peak_rss_mb, prepare_all_tracks, render_markdown_report, run_reference_benchmarks,
+)
+
+
+def test_peak_rss_mb_reads_real_process_memory_not_python_heap(monkeypatch):
+    # Review I2: tracemalloc only sees Python/numpy heap allocations, not
+    # torch/ONNX memory (measured ~7x under real process RSS). Report the
+    # OS-level resident set size instead.
+    import resource as resource_module
+
+    from types import SimpleNamespace
+    monkeypatch.setattr("scripts.run_quality_benchmarks.resource.getrusage",
+                         lambda who: SimpleNamespace(ru_maxrss=512000))
+    monkeypatch.setattr("scripts.run_quality_benchmarks.sys.platform", "linux")
+
+    assert _peak_rss_mb() == pytest.approx(500.0)  # 512000 KB on Linux
+
+
+def test_prepare_all_tracks_isolates_one_preparation_failure(monkeypatch, tmp_path):
+    # Review I1: prepare_track() failures (corrupt metadata.yaml, a missing
+    # stem wav, an alignment check) ran unguarded in main(), aborting the
+    # whole benchmark before run_reference_benchmarks ever saw any track.
+    track_dirs = [tmp_path / "Track00001", tmp_path / "Track00002"]
+    for d in track_dirs:
+        d.mkdir()
+
+    def fake_prepare_track(track_dir, out_dir):
+        if track_dir.name == "Track00002":
+            raise ValueError("misaligned")
+        return {"track_id": track_dir.name, "group_note_counts": {}}
+
+    monkeypatch.setattr("scripts.run_quality_benchmarks.prepare_track", fake_prepare_track)
+
+    prepared, failures = prepare_all_tracks(track_dirs, tmp_path / "prepared")
+
+    assert [t["track_id"] for t in prepared] == ["Track00001"]
+    assert len(failures) == 1
+    assert failures[0]["track_id"] == "Track00002"
+    assert failures[0]["error"] == "misaligned"
+    assert failures[0]["quality_report"] is None
+
+
+def test_fresh_cache_root_is_unique_each_call(tmp_path):
+    # Review C3: a fixed cache_root lets a second main() run resume stale
+    # cached stems/MIDI from a previous (possibly different-code) run,
+    # making history snapshots incomparable across versions.
+    first = _fresh_cache_root(tmp_path)
+    second = _fresh_cache_root(tmp_path)
+    assert first != second
+    assert first.parent == tmp_path and second.parent == tmp_path
 
 
 def test_run_reference_benchmarks_isolates_one_failure(monkeypatch, tmp_path):

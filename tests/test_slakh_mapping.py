@@ -89,6 +89,31 @@ def test_prepare_track_builds_grouped_ground_truth(tmp_path):
     assert sum(len(i.notes) for i in drum_insts) == 1
     assert sum(len(i.notes) for i in pitched_insts) == 2
 
+    # Review C2: Demucs always outputs 2-channel stems (channels=2,
+    # hardcoded in demucs_backend.py); a mono ground-truth reference fails
+    # separation_quality's shape check and SDR is silently never computed.
+    drums_info = sf.info(str(gt_dir / "drums.wav"))
+    assert drums_info.channels == 2
+
+
+def test_prepare_track_handles_missing_stem_audio_without_crashing(tmp_path):
+    # Review I5: Slakh's metadata.yaml "audio_rendered" flag is unreliable
+    # in practice (BabySlakh Track00020 marks every stem False yet ships
+    # the wavs); existence on disk is the safer test, and a missing wav
+    # must not crash the whole track -- the MIDI still describes what the
+    # composition contains, so its notes stay in the ground truth.
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00003", stems=[
+        ("S00", "Guitar", False, 48),
+        ("S01", "Drums", True, 0),
+    ])
+    (track_dir / "stems" / "S01.wav").unlink()
+
+    result = prepare_track(track_dir, tmp_path / "prepared3")
+
+    assert result["group_note_counts"]["drums"] == 1
+    assert not (Path(result["ground_truth_stems_dir"]) / "drums.wav").exists()
+    assert any("S01" in w for w in result["warnings"])
+
 
 def test_prepare_track_rejects_misaligned_ground_truth(tmp_path):
     track_dir = _write_fake_slakh_track(tmp_path / "Track00002", stems=[("S00", "Guitar", False, 48)])

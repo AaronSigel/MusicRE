@@ -37,7 +37,16 @@ def fetch_babyslakh(
     if archive_path is None:
         archive_path = dest_dir / "babyslakh_16k.tar.gz"
         if force or not Path(archive_path).exists():
-            urllib.request.urlretrieve(BABYSLAKH_URL, archive_path)
+            # Download to a .part file and only move it into place on
+            # success, so an interrupted 882 MB transfer never leaves a
+            # corrupt archive at the path every later run reuses.
+            partial_path = Path(str(archive_path) + ".part")
+            try:
+                urllib.request.urlretrieve(BABYSLAKH_URL, partial_path)
+                partial_path.replace(archive_path)
+            except Exception:
+                partial_path.unlink(missing_ok=True)
+                raise
     archive_path = Path(archive_path)
 
     extracted: List[Path] = []
@@ -49,10 +58,18 @@ def fetch_babyslakh(
                 if track_dir.is_dir() and not force:
                     extracted.append(track_dir)
                     continue
-                prefix = f"{track_id}/"
-                matching = [m for m in members if m.name.startswith(prefix)]
+                # The real BabySlakh archive nests every track under one
+                # top-level folder (e.g. babyslakh_16k/TrackXXXXX/...), not
+                # at the archive root, so match on the track id as a path
+                # component and re-root the extracted path at dest_dir/raw/.
+                matching = []
+                for m in members:
+                    parts = Path(m.name).parts
+                    if track_id in parts:
+                        m.name = str(Path(*parts[parts.index(track_id):]))
+                        matching.append(m)
                 if not matching:
-                    continue
+                    raise ValueError(f"{track_id} not found in archive {archive_path}")
                 try:
                     tf.extractall(raw_dir, members=matching)
                 except Exception:
@@ -60,13 +77,15 @@ def fetch_babyslakh(
                         shutil.rmtree(track_dir, ignore_errors=True)
                     raise
                 extracted.append(track_dir)
-    except tarfile.TarError:
+    except tarfile.TarError as e:
         # A corrupt/partial archive must not leave any half-extracted track
         # directory that could pass for a complete one (Review Focus #4).
         for track_id in track_ids:
             track_dir = raw_dir / track_id
             if track_dir.exists():
                 shutil.rmtree(track_dir, ignore_errors=True)
-        raise
+        raise tarfile.TarError(
+            f"Corrupt or incomplete archive at {archive_path}: {e}. Delete it and retry."
+        ) from e
 
     return sorted(extracted)

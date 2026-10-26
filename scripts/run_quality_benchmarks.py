@@ -7,11 +7,11 @@ snapshot so later versions can be compared against this one.
 """
 import argparse
 import json
+import resource
 import shutil
 import subprocess
 import sys
 import time
-import tracemalloc
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -27,13 +27,36 @@ from scripts.fetch_slakh_subset import fetch_babyslakh
 from scripts.slakh_mapping import prepare_track
 
 
+def _fresh_cache_root(base: Path) -> Path:
+    """A new, never-before-used cache directory under base.
+
+    A fixed cache_root would let a later run resume cached stems/MIDI from
+    an earlier run that used different code, making the history snapshot
+    this run writes incomparable to the previous one (it would silently
+    show stale outputs under a new git revision).
+    """
+    token = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    return Path(base) / token
+
+
 def _as_dict(report) -> dict:
     return report.model_dump() if hasattr(report, "model_dump") else dict(report)
 
 
+def _peak_rss_mb() -> float:
+    """Process-wide peak resident set size, not just the Python/numpy heap.
+
+    tracemalloc only sees allocations made through Python's own allocator;
+    torch and ONNX Runtime allocate most of their memory outside it, so
+    tracemalloc under-reports real peak RAM by a large factor during a
+    pipeline run. ru_maxrss is KB on Linux, bytes on macOS.
+    """
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1024 * 1024 if sys.platform == "darwin" else 1024)
+
+
 def _run_one(mix_path, workspace, ground_truth_stems=None, ground_truth_midi=None):
     """Time one pipeline+evaluate run; never raises, reports error instead."""
-    tracemalloc.start()
     t0 = time.perf_counter()
     quality_report, error = None, None
     try:
@@ -44,9 +67,7 @@ def _run_one(mix_path, workspace, ground_truth_stems=None, ground_truth_midi=Non
     except Exception as e:
         error = str(e)
     wall_time_sec = time.perf_counter() - t0
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    return quality_report, error, wall_time_sec, peak / (1024 * 1024)
+    return quality_report, error, wall_time_sec, _peak_rss_mb()
 
 
 def _false_notes_on_absent_instrument(quality_report: Optional[dict], group_note_counts: Dict[str, int]) -> Dict[str, int]:
@@ -56,6 +77,26 @@ def _false_notes_on_absent_instrument(quality_report: Optional[dict], group_note
     return {group: stems[group]["notes_count"]
             for group, count in group_note_counts.items()
             if count == 0 and group in stems}
+
+
+def prepare_all_tracks(track_dirs: List[Path], prepared_dir: Path):
+    """Run prepare_track() per track, isolating one bad track's failure
+    (corrupt metadata.yaml, a missing stem wav, an alignment mismatch) so
+    it doesn't abort every other track's benchmark run.
+
+    Returns (prepared, failures): prepared is prepare_track()'s normal
+    output list; failures is a list already shaped like a
+    run_reference_benchmarks() entry (quality_report=None, the raised
+    error's message) so it can be appended straight into the report.
+    """
+    prepared, failures = [], []
+    for track_dir in track_dirs:
+        try:
+            prepared.append(prepare_track(track_dir, prepared_dir / track_dir.name))
+        except Exception as e:
+            failures.append(dict(track_id=track_dir.name, quality_report=None, wall_time_sec=0.0,
+                                  peak_ram_mb=0.0, error=str(e), false_notes_on_absent_instrument={}))
+    return prepared, failures
 
 
 def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path) -> List[dict]:
@@ -166,10 +207,10 @@ def main():
 
     # prepare_track is cheap and deterministic; re-running it keeps
     # group_note_counts correct without a separate "already prepared" cache.
-    prepared_tracks = [prepare_track(d, prepared_dir / d.name) for d in track_dirs]
+    prepared_tracks, prep_failures = prepare_all_tracks(track_dirs, prepared_dir)
 
-    cache_root = Path("data/benchmarks/cache")
-    reference_results = run_reference_benchmarks(prepared_tracks, cache_root=cache_root)
+    cache_root = _fresh_cache_root(Path("data/benchmarks/cache"))
+    reference_results = run_reference_benchmarks(prepared_tracks, cache_root=cache_root) + prep_failures
     manual_results = run_manual_spotcheck([Path(p) for p in args.real_track], cache_root=cache_root)
 
     report = dict(
