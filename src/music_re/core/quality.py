@@ -49,10 +49,20 @@ def evaluate_quality(
     peak = float(np.max(np.abs(y_mix))) if len(y_mix) > 0 else 0.0
     peak_dbfs = round(20.0 * np.log10(max(peak, 1e-9)), 2)
     clipping_samples = int(np.sum(np.abs(y_mix) >= 0.999))
+
+    # Signal-to-noise floor estimate
+    if len(y_mix) > 0:
+        rms_val = np.sqrt(np.mean(y_mix**2) + 1e-12)
+        noise_floor = np.percentile(np.abs(y_mix), 10) + 1e-9
+        snr_estimate = round(float(20.0 * np.log10(rms_val / noise_floor)), 2)
+    else:
+        snr_estimate = 0.0
+
     audio_diagnostics = {
         "duration_sec": round(float(len(y_mix) / sr), 2),
         "peak_dbfs": peak_dbfs,
         "clipping_samples": clipping_samples,
+        "snr_estimate_db": snr_estimate,
     }
 
     manifest = workspace.get_manifest(p)

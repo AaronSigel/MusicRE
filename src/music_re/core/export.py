@@ -19,6 +19,13 @@ def export_bundle(
     out_target = Path(target_path).resolve()
 
     track_dir = workspace.get_track_dir(p)
+
+    # Defensive path safety checks
+    if out_target == p:
+        raise ValueError("Target path cannot overwrite source input file")
+    if out_target == track_dir or track_dir in out_target.parents:
+        raise ValueError("Target path cannot be inside the track cache workspace")
+
     manifest = workspace.get_manifest(p)
 
     def _copy_contents(destination_dir: Path) -> None:
@@ -40,11 +47,12 @@ def export_bundle(
             if src_m.is_file():
                 shutil.copy2(str(src_m), str(midis_dest / f"{src_m.name}"))
 
-        # Copy any raw unquantized midis present in track workspace
-        src_midis_dir = track_dir / "midis"
-        if src_midis_dir.is_dir():
-            for raw_m in src_midis_dir.glob("*_raw.mid"):
-                shutil.copy2(str(raw_m), str(midis_dest / raw_m.name))
+        # Copy raw unquantized midis unless running under 'fast' profile
+        if profile != "fast":
+            src_midis_dir = track_dir / "midis"
+            if src_midis_dir.is_dir():
+                for raw_m in src_midis_dir.glob("*_raw.mid"):
+                    shutil.copy2(str(raw_m), str(midis_dest / raw_m.name))
 
         # 3. Timeline
         tl_path = workspace.get_timeline_path(p)
@@ -63,6 +71,8 @@ def export_bundle(
 
     if archive:
         zip_path = out_target if out_target.suffix == ".zip" else out_target.with_suffix(".zip")
+        if zip_path == p:
+            raise ValueError("Target path cannot overwrite source input file")
         zip_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as td:
             temp_bundle_dir = Path(td) / p.stem

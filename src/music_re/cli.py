@@ -277,6 +277,10 @@ def cmd_deconstruct(
     console.print(f"[bold cyan]Starting deconstruct pipeline for {file.name}...[/bold cyan]")
     ws.update_manifest(file, status="processing")
 
+    # Profile overrides
+    if profile == "fast":
+        six_stems = False
+
     # 1. Split stems
     expected_stem_count = 6 if six_stems else 4
     can_resume_separation = (

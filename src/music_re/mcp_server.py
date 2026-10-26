@@ -149,6 +149,9 @@ async def deconstruct_full_pipeline(
     p = Path(file_path).resolve()
     ws = WorkspaceManager()
 
+    if profile == "fast":
+        six_stems = False
+
     # 1. Separate stems
     split_res = core_separate_stems(p, workspace=ws, six_stems=six_stems, device=device)
 
@@ -178,7 +181,7 @@ async def deconstruct_full_pipeline(
             timeline=timeline,
             bpm=bpm,
             quantize=True,
-            save_raw=True,
+            save_raw=(profile != "fast"),
         )
         midi_map[name] = str(out_mid)
 
@@ -187,9 +190,12 @@ async def deconstruct_full_pipeline(
     build_combined_midi_project(midi_map, all_stems_path, timeline=timeline, bpm=bpm)
     midi_map["all_stems"] = str(all_stems_path)
 
-    # 5. Quality evaluation
-    report = core_evaluate_quality(workspace=ws, file_path=p)
-    ws.save_quality_report(p, report)
+    # 5. Quality evaluation (skipped under fast profile)
+    report_dict = None
+    if profile != "fast":
+        report = core_evaluate_quality(workspace=ws, file_path=p)
+        ws.save_quality_report(p, report)
+        report_dict = report.model_dump()
 
     return {
         "workspace_dir": str(track_dir),
@@ -197,7 +203,7 @@ async def deconstruct_full_pipeline(
         "timeline": timeline.model_dump(),
         "stems": split_res.stems,
         "midis": midi_map,
-        "quality_report": report.model_dump(),
+        "quality_report": report_dict,
     }
 
 
