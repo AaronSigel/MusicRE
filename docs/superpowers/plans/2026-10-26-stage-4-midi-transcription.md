@@ -38,10 +38,10 @@
 **Interfaces:**
 - Produces: `quantize_to_timeline(pm: pretty_midi.PrettyMIDI, timeline: Optional[MusicalTimeline] = None, bpm: float = 120.0, grid_subdivisions: int = 4, min_duration: float = 0.05) -> pretty_midi.PrettyMIDI`
 
-- [ ] **Step 1: Write failing test in `tests/test_midi_quantize.py` validating dynamic timeline beat grid snapping**
-- [ ] **Step 2: Run `uv run pytest tests/test_midi_quantize.py` and verify FAIL**
-- [ ] **Step 3: Implement `midi_quantize.py` with sub-beat interpolation and pitch-group overlap deduplication**
-- [ ] **Step 4: Run `uv run pytest tests/test_midi_quantize.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_midi_quantize.py` validating dynamic timeline beat grid snapping**
+- [x] **Step 2: Run `uv run pytest tests/test_midi_quantize.py` and verify FAIL**
+- [x] **Step 3: Implement `midi_quantize.py` with sub-beat interpolation and pitch-group overlap deduplication**
+- [x] **Step 4: Run `uv run pytest tests/test_midi_quantize.py` and verify PASS**
 
 ---
 
@@ -59,10 +59,10 @@
 - Produces: `BasicPitchTranscriber` (tonal mode) and `DrumTranscriber` (drums mode)
 - Produces: `get_transcriber_backend(mode: str = "tonal", name: str = "auto") -> TranscriberBackend`
 
-- [ ] **Step 1: Write failing test in `tests/test_transcriber_backends.py` testing transcriber adapters and registry**
-- [ ] **Step 2: Run `uv run pytest tests/test_transcriber_backends.py` and verify FAIL**
-- [ ] **Step 3: Implement `transcriber_base.py`, `basic_pitch_backend.py`, and `drum_backend.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_transcriber_backends.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_transcriber_backends.py` testing transcriber adapters and registry**
+- [x] **Step 2: Run `uv run pytest tests/test_transcriber_backends.py` and verify FAIL**
+- [x] **Step 3: Implement `transcriber_base.py`, `basic_pitch_backend.py`, and `drum_backend.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_transcriber_backends.py` and verify PASS**
 
 ---
 
@@ -75,10 +75,10 @@
 **Interfaces:**
 - Produces: `build_combined_midi_project(stem_midis: Dict[str, Path | str], output_path: Path | str, timeline: Optional[MusicalTimeline] = None, bpm: float = 120.0) -> Path`
 
-- [ ] **Step 1: Write failing test in `tests/test_midi_project.py` testing multi-track SMF assembly and channel assignments**
-- [ ] **Step 2: Run `uv run pytest tests/test_midi_project.py` and verify FAIL**
-- [ ] **Step 3: Implement `midi_project.py` merging stem tracks with appropriate GM programs and drum channel 10**
-- [ ] **Step 4: Run `uv run pytest tests/test_midi_project.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_midi_project.py` testing multi-track SMF assembly and channel assignments**
+- [x] **Step 2: Run `uv run pytest tests/test_midi_project.py` and verify FAIL**
+- [x] **Step 3: Implement `midi_project.py` merging stem tracks with appropriate GM programs and drum channel 10**
+- [x] **Step 4: Run `uv run pytest tests/test_midi_project.py` and verify PASS**
 
 ---
 
@@ -93,10 +93,10 @@
 - Produces: Integrated `deconstruct` producing `all_stems.mid` and updating `manifest.midis`
 - Produces: CLI `music-re to-midi` with `--timeline` flag
 
-- [ ] **Step 1: Write failing test in `tests/test_midi_pipeline_integration.py` testing CLI flags and combined project generation**
-- [ ] **Step 2: Run `uv run pytest tests/test_midi_pipeline_integration.py` and verify FAIL**
-- [ ] **Step 3: Update `src/music_re/cli.py` to route through transcriber backends, generate `all_stems.mid`, and record in manifest**
-- [ ] **Step 4: Run `uv run pytest tests/test_midi_pipeline_integration.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_midi_pipeline_integration.py` testing CLI flags and combined project generation**
+- [x] **Step 2: Run `uv run pytest tests/test_midi_pipeline_integration.py` and verify FAIL**
+- [x] **Step 3: Update `src/music_re/cli.py` to route through transcriber backends, generate `all_stems.mid`, and record in manifest**
+- [x] **Step 4: Run `uv run pytest tests/test_midi_pipeline_integration.py` and verify PASS**
 
 ---
 
@@ -109,6 +109,6 @@
 - Consumes: Complete Stage 4 pipeline
 - Produces: Full validation of time-synchronized MIDI tracks across dynamic timeline grids
 
-- [ ] **Step 1: Write comprehensive e2e test in `tests/test_midi_e2e.py` verifying dynamic grid snapping, raw/quantized dual files, and multi-track project**
-- [ ] **Step 2: Run `uv run pytest tests/test_midi_e2e.py` and verify PASS**
-- [ ] **Step 3: Run full pytest suite across all tests (75+ tests) and verify 100% green**
+- [x] **Step 1: Write comprehensive e2e test in `tests/test_midi_e2e.py` verifying dynamic grid snapping, raw/quantized dual files, and multi-track project**
+- [x] **Step 2: Run `uv run pytest tests/test_midi_e2e.py` and verify PASS**
+- [x] **Step 3: Run full pytest suite across all tests (75+ tests) and verify 100% green**
