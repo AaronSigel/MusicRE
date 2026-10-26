@@ -11,6 +11,8 @@ import soundfile as sf
 
 def normalize_audio(data: np.ndarray, target_peak_db: float = -1.0) -> np.ndarray:
     """Normalize audio array to a target peak dBFS without changing time/phase."""
+    if data.size == 0:
+        return data.astype(np.float32)
     target_amplitude = 10.0 ** (target_peak_db / 20.0)
     current_peak = float(np.max(np.abs(data)))
     if current_peak == 0.0 or np.isnan(current_peak):

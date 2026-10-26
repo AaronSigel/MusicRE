@@ -150,7 +150,13 @@ def cmd_deconstruct(
     ws.update_manifest(file, status="processing")
 
     # 1. Split stems
-    if "separation" in manifest.completed_stages and manifest.stems:
+    expected_stem_count = 6 if six_stems else 4
+    can_resume_separation = (
+        "separation" in manifest.completed_stages
+        and len(manifest.stems) == expected_stem_count
+        and all(Path(p).is_file() for p in manifest.stems.values())
+    )
+    if can_resume_separation:
         console.print("[green]Reusing previously separated stems from workspace.[/green]")
         stems_dict = manifest.stems
     else:

@@ -5,6 +5,8 @@ import numpy as np
 import pretty_midi
 import scipy.signal
 
+from music_re.core.audio_io import decode_audio
+
 
 def _bandpass_filter(
     y: np.ndarray, sr: int, low_cut: float, high_cut: float, order: int = 3
@@ -80,7 +82,9 @@ def transcribe_drums(
     drum_instrument = pretty_midi.Instrument(program=0, is_drum=True, name="Drums")
 
     sr = 22050
-    y, _ = librosa.load(str(in_p), sr=sr, mono=True)
+    y, sr = decode_audio(in_p, target_sr=sr, normalize_db=None)
+    if y.ndim > 1:
+        y = np.mean(y, axis=1)
 
     if len(y) <= 21 or np.max(np.abs(y)) < 1e-5:
         pm.instruments.append(drum_instrument)

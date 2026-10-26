@@ -60,10 +60,6 @@ def separate_stems(
     completion_marker = stems_dir / f".complete_{model_name}"
 
     # 2. Check for silent audio early to avoid division by zero / NaN assertion errors
-    info = sf.info(str(p))
-    sr = info.samplerate
-    channels = info.channels
-
     from demucs.audio import AudioFile, save_audio
     import torch
 
