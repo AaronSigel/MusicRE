@@ -43,4 +43,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
-markers = ["models: downloads or loads external model weights", "real_e2e: opt-in acceptance on a real MP3"]
+markers = ["models: downloads or loads external model weights", "real_e2e: opt-in acceptance on a real MP3", "dataset: downloads or loads external benchmark datasets (Slakh)"]
