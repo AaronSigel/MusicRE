@@ -12,7 +12,7 @@ def test_license_audit_packages():
     assert "torch" in PACKAGES
     assert "demucs" in PACKAGES
     assert "basic-pitch" in PACKAGES
-    assert "all-in-one-infer (candidate)" in MODEL_WEIGHT_LICENSES
+    assert "all-in-one-infer" in MODEL_WEIGHT_LICENSES
 
 def test_license_audit_installed_lookup():
     lic = get_installed_license("torch")

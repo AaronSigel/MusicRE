@@ -1,0 +1,197 @@
+{
+  "status": "passed",
+  "started_at": "2026-10-26T14:23:24.554182+00:00",
+  "source": "/tmp/opencode/MusicRE-Carefree.mp3",
+  "profile": "balanced",
+  "source_sha256": "8433b770a630d9b1594fd484442c677907ece899a4d149954cd2e74fd733e311",
+  "decoded_frames": 9046656,
+  "duration_sec": 205.1395918367347,
+  "cli_seconds": 171.61719375699977,
+  "mcp_seconds": 186.4844861440033,
+  "artifacts": {
+    "stems": {
+      "bass": {
+        "frames": 9046656,
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration": 205.1395918367347
+      },
+      "drums": {
+        "frames": 9046656,
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration": 205.1395918367347
+      },
+      "other": {
+        "frames": 9046656,
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration": 205.1395918367347
+      },
+      "vocals": {
+        "frames": 9046656,
+        "sample_rate": 44100,
+        "channels": 2,
+        "duration": 205.1395918367347
+      }
+    },
+    "midis": {
+      "all_stems": {
+        "notes": 5146,
+        "tracks": [
+          "Drums",
+          "Bass",
+          "Other",
+          "Vocals"
+        ]
+      },
+      "bass": {
+        "notes": 207,
+        "tracks": [
+          ""
+        ]
+      },
+      "drums": {
+        "notes": 2547,
+        "tracks": [
+          "Drums"
+        ]
+      },
+      "other": {
+        "notes": 1936,
+        "tracks": [
+          ""
+        ]
+      },
+      "vocals": {
+        "notes": 456,
+        "tracks": [
+          ""
+        ]
+      }
+    },
+    "config": {
+      "device": "cpu",
+      "evaluate": true,
+      "grid_subdivisions": 4,
+      "overlap": 0.25,
+      "profile": "balanced",
+      "quantize_ends": true,
+      "requested_device": "cpu",
+      "save_raw": true,
+      "seed": 0,
+      "shifts": 1,
+      "six_stems": false,
+      "structure_backend": "allin1",
+      "structure_model": "harmonix-fold0"
+    },
+    "runtime": {
+      "model_ids": {
+        "drums": "multiband",
+        "separator": "htdemucs",
+        "structure": "harmonix-fold0",
+        "tonal": "icassp_2022/nmp.onnx"
+      },
+      "packages": {
+        "all-in-one-infer": "3.1.0",
+        "basic-pitch": "0.4.0",
+        "demucs": "4.1.0",
+        "librosa": "0.11.0",
+        "mir-eval": "0.8.2",
+        "museval": "0.4.1",
+        "music-re": "0.1.0",
+        "torch": "2.2.2",
+        "torchaudio": "2.2.2"
+      },
+      "python": "3.11.15",
+      "source_input_file": "/tmp/opencode/MusicRE-Carefree.mp3",
+      "weights": {
+        "separator": [
+          {
+            "id": "htdemucs.yaml",
+            "sha256": "239c445d0b14454d541ad8bd9bb271c9e536d267e8a4625208744cbb2e7bb66c"
+          },
+          {
+            "id": "955717e8.safetensors",
+            "sha256": "d9fa14133cfcc034a6758923bb3a8ca9f8dfd0b582134643bbf83f72c17576dd"
+          }
+        ],
+        "structure": [
+          {
+            "id": "harmonix-fold0-0vra4ys2.pth",
+            "sha256": "0db596dfb0995f41d62f6267d76a9d54c046f1649bd35e1dbeca0c5f9a7b8acd"
+          }
+        ],
+        "tonal": [
+          {
+            "id": "nmp.onnx",
+            "sha256": "2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec"
+          }
+        ]
+      }
+    },
+    "timeline": {
+      "duration": 205.1395918367347,
+      "bpm": 97.0,
+      "backend": "allin1",
+      "model": "harmonix-fold0",
+      "beats": 321,
+      "downbeats": 81,
+      "sections": 12
+    },
+    "results": {
+      "bass": {
+        "backend": "basic_pitch",
+        "midi_path": "midis/bass.mid",
+        "note_count": 207,
+        "parameters": {
+          "grid_subdivisions": 4,
+          "model": "icassp_2022/nmp.onnx",
+          "quantize_ends": true
+        },
+        "raw_midi_path": "midis/bass_raw.mid",
+        "status": "notes"
+      },
+      "drums": {
+        "backend": "drum_multiband",
+        "midi_path": "midis/drums.mid",
+        "note_count": 2547,
+        "parameters": {
+          "grid_subdivisions": 4,
+          "quantize_ends": true
+        },
+        "raw_midi_path": "midis/drums_raw.mid",
+        "status": "notes"
+      },
+      "other": {
+        "backend": "basic_pitch",
+        "midi_path": "midis/other.mid",
+        "note_count": 1936,
+        "parameters": {
+          "grid_subdivisions": 4,
+          "model": "icassp_2022/nmp.onnx",
+          "quantize_ends": true
+        },
+        "raw_midi_path": "midis/other_raw.mid",
+        "status": "notes"
+      },
+      "vocals": {
+        "backend": "basic_pitch",
+        "midi_path": "midis/vocals.mid",
+        "note_count": 456,
+        "parameters": {
+          "grid_subdivisions": 4,
+          "model": "icassp_2022/nmp.onnx",
+          "quantize_ends": true
+        },
+        "raw_midi_path": "midis/vocals_raw.mid",
+        "status": "notes"
+      }
+    }
+  },
+  "warm_resume": "passed",
+  "parity": "passed",
+  "midi_tolerance_sec": 0.003,
+  "finished_at": "2026-10-26T14:29:50.584579+00:00",
+  "peak_child_rss_kib": 4835336
+}

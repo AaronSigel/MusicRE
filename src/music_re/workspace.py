@@ -85,6 +85,8 @@ class WorkspaceManager:
         return tl_path
 
     def load_timeline(self, file_path: Union[str, Path]) -> Optional[MusicalTimeline]:
+        if 'structure' not in self.get_manifest(file_path).completed_stages:
+            return None
         tl_path = self.get_timeline_path(file_path)
         if not tl_path.exists():
             return None
@@ -105,6 +107,8 @@ class WorkspaceManager:
         return qr_path
 
     def load_quality_report(self, file_path: Union[str, Path]) -> Optional[QualityReport]:
+        if 'evaluation' not in self.get_manifest(file_path).completed_stages:
+            return None
         qr_path = self.get_quality_report_path(file_path)
         if not qr_path.exists():
             return None
@@ -162,21 +166,48 @@ class WorkspaceManager:
         artifacts: Optional[Dict[str, Any]] = None,
     ) -> WorkspaceManifest:
         manifest = self.get_manifest(file_path)
-        if stage not in manifest.completed_stages:
-            manifest.completed_stages.append(stage)
-        if artifacts:
+        if artifacts is not None:
             if stage == "separation":
-                manifest.stems.update(artifacts)
+                if manifest.stems != artifacts:
+                    manifest = self.invalidate_stages(file_path, ['analysis', 'structure', 'transcription', 'evaluation'])
+                manifest.stems = dict(artifacts)
             elif stage == "analysis":
                 manifest.analysis = artifacts
             elif stage == "structure":
+                if manifest.timeline != artifacts.get('timeline', artifacts):
+                    manifest = self.invalidate_stages(file_path, ['transcription', 'evaluation'])
                 manifest.timeline = artifacts.get("timeline", artifacts)
             elif stage == "evaluation":
                 manifest.evaluation = artifacts
             elif stage == "transcription":
-                manifest.midis.update(artifacts)
+                manifest.midis = dict(artifacts)
+        if stage not in manifest.completed_stages:
+            manifest.completed_stages.append(stage)
         if stage in manifest.stage_errors:
             del manifest.stage_errors[stage]
+        self.save_manifest(file_path, manifest)
+        return manifest
+
+    def invalidate_stages(self, file_path: Union[str, Path], stages) -> WorkspaceManifest:
+        """Invalidate active state without deleting user or historical artifacts."""
+        manifest = self.get_manifest(file_path)
+        for stage in stages:
+            manifest.completed_stages = [s for s in manifest.completed_stages if s != stage]
+            manifest.stage_fingerprints.pop(stage, None)
+            manifest.artifact_hashes.pop(stage, None)
+            manifest.stage_errors.pop(stage, None)
+            if stage == 'separation':
+                manifest.stems = {}
+            elif stage == 'analysis':
+                manifest.analysis = None
+            elif stage == 'structure':
+                manifest.timeline = None
+            elif stage == 'transcription':
+                manifest.midis = {}
+                manifest.transcription_results = {}
+            elif stage == 'evaluation':
+                manifest.evaluation = None
+        manifest.status = 'pending'
         self.save_manifest(file_path, manifest)
         return manifest
 

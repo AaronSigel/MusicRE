@@ -30,3 +30,34 @@ def test_segregated_model_cache(tmp_path: Path):
     stem_v4 = ws.get_stem_path(dummy, "vocals", model_name="htdemucs")
     stem_v6 = ws.get_stem_path(dummy, "vocals", model_name="htdemucs_6s")
     assert stem_v4 != stem_v6
+
+
+def test_switching_stem_sets_invalidates_dependents(tmp_path):
+    ws = WorkspaceManager(tmp_path / 'cache')
+    audio = tmp_path / 'song.wav'
+    audio.write_bytes(b'input')
+    six = {n: f'/six/{n}.wav' for n in ('vocals', 'bass', 'drums', 'other', 'guitar', 'piano')}
+    four = {n: f'/four/{n}.wav' for n in ('vocals', 'bass', 'drums', 'other')}
+    ws.mark_stage_complete(audio, 'separation', six)
+    ws.mark_stage_complete(audio, 'analysis', {'bpm': 120})
+    ws.mark_stage_complete(audio, 'structure', {'timeline': {'bpm': 120}})
+    ws.mark_stage_complete(audio, 'transcription', {'guitar': '/old.mid'})
+    ws.mark_stage_complete(audio, 'evaluation', {'report': {}})
+    ws.mark_stage_complete(audio, 'separation', four)
+    m = ws.get_manifest(audio)
+    assert m.stems == four
+    assert m.midis == {}
+    assert m.timeline is None and m.analysis is None and m.evaluation is None
+    assert m.completed_stages == ['separation']
+    ws.mark_stage_complete(audio, 'separation', six)
+    assert ws.get_manifest(audio).stems == six
+
+
+def test_invalidated_reports_cannot_be_loaded_from_old_files(tmp_path):
+    from music_re.schemas import MusicalTimeline
+    ws = WorkspaceManager(tmp_path / 'cache')
+    audio = tmp_path / 'song.wav'
+    audio.write_bytes(b'input')
+    ws.save_timeline(audio, MusicalTimeline(duration_sec=1, bpm=120, beats=[], downbeats=[]))
+    ws.mark_stage_complete(audio, 'separation', {'vocals': '/new.wav'})
+    assert ws.load_timeline(audio) is None

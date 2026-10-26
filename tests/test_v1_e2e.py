@@ -14,7 +14,7 @@ from music_re.core.separator import separate_stems
 from music_re.workspace import WorkspaceManager
 
 
-def test_v1_full_pipeline_end_to_end(tmp_path: Path):
+def test_v1_full_pipeline_end_to_end(tmp_path: Path, seed_stem_cache):
     sr = 22050
     duration_sec = 4.0
     t = np.linspace(0, duration_sec, int(sr * duration_sec), endpoint=False)
@@ -49,7 +49,7 @@ def test_v1_full_pipeline_end_to_end(tmp_path: Path):
     sf.write(str(mock_stems["bass"]), y_bass, sr)
     sf.write(str(mock_stems["drums"]), y_kick, sr)
     sf.write(str(mock_stems["other"]), y_melody * 0.1, sr)
-    (stems_dir / ".complete_htdemucs").write_text("ok")
+    seed_stem_cache(input_audio, mock_stems)
 
     sep_res = separate_stems(input_audio, workspace=ws, six_stems=False)
     assert len(sep_res.stems) == 4
@@ -61,18 +61,19 @@ def test_v1_full_pipeline_end_to_end(tmp_path: Path):
     tl_file = ws.save_timeline(input_audio, timeline)
     assert tl_file.exists()
     assert len(timeline.beats) > 0
-    assert len(timeline.downbeats) > 0
+    assert timeline.downbeats == []  # Neural downbeat detection is tested separately.
     assert len(timeline.sections) > 0
 
     # 5. MIDI Transcription with timeline snapping
     midis_dir = track_dir / "midis"
     midis_dir.mkdir(parents=True, exist_ok=True)
     stem_midis = {}
+    transcription_results = {}
     for name, stem_p in sep_res.stems.items():
         out_mid = midis_dir / f"{name}.mid"
         mode = "drums" if name == "drums" else "tonal"
         transcriber = get_transcriber_backend(mode=mode)
-        transcriber.transcribe(
+        result = transcriber.transcribe(
             audio_path=stem_p,
             output_midi_path=out_mid,
             timeline=timeline,
@@ -83,6 +84,7 @@ def test_v1_full_pipeline_end_to_end(tmp_path: Path):
         assert out_mid.exists()
         assert (midis_dir / f"{name}_raw.mid").exists(), "Raw unquantized copy must exist"
         stem_midis[name] = str(out_mid)
+        transcription_results[name] = result.model_dump()
 
     # Combined project
     all_stems_path = midis_dir / "all_stems.mid"
@@ -90,6 +92,11 @@ def test_v1_full_pipeline_end_to_end(tmp_path: Path):
     assert all_stems_path.exists()
     stem_midis["all_stems"] = str(all_stems_path)
     ws.mark_stage_complete(input_audio, "transcription", artifacts=stem_midis)
+    ws.save_metadata(input_audio, {'bpm': timeline.bpm})
+    ws.mark_stage_complete(input_audio, 'analysis', {'bpm': timeline.bpm})
+    from music_re.core.profiles import resolve_profile
+    ws.update_manifest(input_audio, transcription_results=transcription_results,
+                        run_config=resolve_profile('balanced').to_dict(), status='completed')
 
     # 6. Quality Evaluation (quality_report.json)
     report = evaluate_quality(ws, input_audio)
@@ -101,7 +108,7 @@ def test_v1_full_pipeline_end_to_end(tmp_path: Path):
 
     # 7. Final Bundle Export
     export_dir = tmp_path / "v1_release_bundle"
-    export_bundle(ws, input_audio, export_dir, profile="quality", archive=False)
+    export_bundle(ws, input_audio, export_dir, profile="balanced", archive=False)
     assert (export_dir / "timeline.json").is_file()
     assert (export_dir / "manifest.json").is_file()
     assert (export_dir / "quality_report.json").is_file()

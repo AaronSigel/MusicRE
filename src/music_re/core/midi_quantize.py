@@ -12,9 +12,18 @@ def build_quantize_grid(
     max_duration: float = 600.0,
 ) -> np.ndarray:
     """Build fine-grained timestamps for quantization using dynamic beats or static metronome."""
-    if timeline and timeline.beats and len(timeline.beats) >= 2:
-        beats = np.array(sorted(timeline.beats), dtype=np.float64)
-        sub_grid = []
+    if not isinstance(grid_subdivisions, int) or grid_subdivisions <= 0:
+        raise ValueError('grid_subdivisions must be a positive integer')
+    if timeline:
+        unique_beats = sorted({float(t) for t in timeline.beats if np.isfinite(t) and t >= 0})
+    else:
+        unique_beats = []
+    if len(unique_beats) >= 2:
+        beats = np.array(unique_beats, dtype=np.float64)
+        first_step = (beats[1] - beats[0]) / grid_subdivisions
+        sub_grid = list(np.arange(beats[0], -first_step / 2, -first_step)[::-1])
+        sub_grid = [max(0.0, t) for t in sub_grid if t < beats[0]]
+        sub_grid.append(0.0)
 
         # Subdivide each beat interval
         for i in range(len(beats) - 1):
@@ -34,7 +43,7 @@ def build_quantize_grid(
             last_t += avg_step
             sub_grid.append(last_t)
 
-        return np.array(sub_grid, dtype=np.float64)
+        return np.unique(sub_grid)
 
     # Static metronome fallback
     effective_bpm = bpm if bpm > 0 else 120.0
@@ -62,6 +71,7 @@ def quantize_to_timeline(
     bpm: float = 120.0,
     grid_subdivisions: int = 4,
     min_duration: float = 0.05,
+    quantize_ends: bool = True,
 ) -> pretty_midi.PrettyMIDI:
     """Snap note onsets to dynamic timeline subdivisions and resolve same-pitch polyphonic overlaps."""
     max_t = 0.0
@@ -96,7 +106,11 @@ def quantize_to_timeline(
                 snapped_start = max(0.0, limit_duration - min_duration)
                 snapped_end = limit_duration
             else:
-                snapped_end = max(snapped_start + min_duration, n.end)
+                snapped_end = snap_to_nearest_grid(n.end, grid) if quantize_ends else n.end
+                minimum_end = snapped_start + min_duration if quantize_ends else snapped_start
+                if snapped_end <= minimum_end:
+                    next_idx = np.searchsorted(grid, snapped_start + min_duration)
+                    snapped_end = float(grid[min(next_idx, len(grid) - 1)])
                 if limit_duration > 0 and snapped_end > limit_duration:
                     snapped_end = limit_duration
 

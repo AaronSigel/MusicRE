@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Union
 
-from music_re.schemas import MusicalTimeline
+from music_re.schemas import MusicalTimeline, TranscriptionResult
 
 
 class TranscriberBackend(ABC):
@@ -21,6 +21,28 @@ class TranscriberBackend(ABC):
         bpm: float = 120.0,
         quantize: bool = True,
         save_raw: bool = True,
-    ) -> Path:
+        grid_subdivisions: int = 4,
+        quantize_ends: bool = True,
+    ) -> TranscriptionResult:
         """Transcribe audio stem to MIDI file, with optional timeline synchronization and raw preservation."""
         pass
+
+
+def save_transcription(pm, output_path, raw_pm, backend, parameters) -> TranscriptionResult:
+    """Write validated MIDI atomically; an empty successful inference is explicit."""
+    import tempfile
+    out = Path(output_path).resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    count = sum(len(i.notes) for i in pm.instruments)
+    raw_out = out.with_name(f'{out.stem}_raw{out.suffix}') if raw_pm is not None else None
+    with tempfile.TemporaryDirectory(dir=out.parent) as temp:
+        staged = Path(temp) / 'result.mid'
+        pm.write(str(staged))
+        if raw_pm is not None:
+            raw_staged = Path(temp) / 'raw.mid'
+            raw_pm.write(str(raw_staged))
+            raw_staged.replace(raw_out)
+        staged.replace(out)
+    return TranscriptionResult(status='notes' if count else 'no_notes', midi_path=str(out),
+                               raw_midi_path=str(raw_out) if raw_out else None,
+                               note_count=count, backend=backend, parameters=parameters)

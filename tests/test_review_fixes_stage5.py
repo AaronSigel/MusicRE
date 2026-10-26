@@ -23,7 +23,7 @@ def test_export_bundle_prevents_source_overwrite(tmp_path: Path):
         export_bundle(ws, track_wav, ws.get_track_dir(track_wav))
 
 
-def test_quality_report_includes_snr_estimate(tmp_path: Path):
+def test_quality_report_includes_amplitude_diagnostic(tmp_path: Path):
     ws = WorkspaceManager(cache_root=tmp_path / "cache")
     track_wav = tmp_path / "song.wav"
     sr = 22050
@@ -33,30 +33,15 @@ def test_quality_report_includes_snr_estimate(tmp_path: Path):
     sf.write(str(track_wav), y.astype(np.float32), sr)
 
     report = evaluate_quality(ws, track_wav)
-    assert "snr_estimate_db" in report.audio_diagnostics
-    assert isinstance(report.audio_diagnostics["snr_estimate_db"], float)
+    assert "rms_to_p10_amplitude_db" in report.audio_diagnostics
+    assert isinstance(report.audio_diagnostics["rms_to_p10_amplitude_db"], float)
 
 
-def test_export_bundle_respects_profiles(tmp_path: Path):
-    ws = WorkspaceManager(cache_root=tmp_path / "cache")
-    track_wav = tmp_path / "song.wav"
-    sr = 22050
-    sf.write(str(track_wav), np.zeros(sr, dtype=np.float32), sr)
-
-    # Populate mock stems and midis
-    stems_dir = ws.get_stems_dir(track_wav, model_name="htdemucs")
-    for s in ["vocals", "drums", "bass", "other"]:
-        sf.write(str(stems_dir / f"{s}.wav"), np.zeros(sr, dtype=np.float32), sr)
-    (stems_dir / ".complete_htdemucs").write_text("ok")
-    ws.mark_stage_complete(track_wav, "separation", artifacts={"vocals": str(stems_dir / "vocals.wav")})
-
-    midis_dir = ws.get_track_dir(track_wav) / "midis"
-    midis_dir.mkdir(parents=True, exist_ok=True)
-    (midis_dir / "vocals.mid").write_bytes(b"MThd")
-    (midis_dir / "vocals_raw.mid").write_bytes(b"MThd_RAW")
-    ws.mark_stage_complete(track_wav, "transcription", artifacts={"vocals": str(midis_dir / "vocals.mid")})
-
+def test_export_bundle_respects_profiles(tmp_path: Path, complete_workspace):
     # Under 'fast' profile, raw backup midis should be excluded from final export bundle
+    from music_re.core.profiles import resolve_profile
+    ws, track_wav = complete_workspace
+    ws.update_manifest(track_wav, run_config=resolve_profile('fast').to_dict())
     fast_export = tmp_path / "export_fast"
     export_bundle(ws, track_wav, fast_export, profile="fast")
     assert (fast_export / "midis" / "vocals.mid").is_file()
@@ -64,5 +49,6 @@ def test_export_bundle_respects_profiles(tmp_path: Path):
 
     # Under 'quality' profile, raw backup midis should be included
     quality_export = tmp_path / "export_quality"
+    ws.update_manifest(track_wav, run_config=resolve_profile('quality').to_dict())
     export_bundle(ws, track_wav, quality_export, profile="quality")
     assert (quality_export / "midis" / "vocals_raw.mid").is_file()

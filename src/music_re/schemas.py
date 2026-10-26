@@ -1,8 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
 class WorkspaceManifest(BaseModel):
+    schema_version: int = 2
     track_id: str
     input_file: str
     status: str = Field(default="pending", description="'pending' | 'processing' | 'completed' | 'failed'")
@@ -14,6 +15,11 @@ class WorkspaceManifest(BaseModel):
     timeline: Optional[Dict[str, Any]] = None
     evaluation: Optional[Dict[str, Any]] = None
     midis: Dict[str, str] = Field(default_factory=dict)
+    run_config: Dict[str, Any] = Field(default_factory=dict)
+    runtime: Dict[str, Any] = Field(default_factory=dict)
+    stage_fingerprints: Dict[str, str] = Field(default_factory=dict)
+    transcription_results: Dict[str, Any] = Field(default_factory=dict)
+    artifact_hashes: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
 
 class QualityReport(BaseModel):
@@ -24,11 +30,20 @@ class QualityReport(BaseModel):
     evaluated_at: str = Field(description="ISO timestamp")
 
 
+class TranscriptionResult(BaseModel):
+    status: Literal['notes', 'no_notes']
+    midi_path: str
+    raw_midi_path: Optional[str] = None
+    note_count: int = Field(ge=0)
+    backend: str
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
 class TimelineSection(BaseModel):
     label: str = Field(description="Section label, e.g. 'intro', 'verse', 'chorus', 'bridge', 'outro'")
     start_sec: float = Field(description="Start time in seconds")
     end_sec: float = Field(description="End time in seconds")
-    confidence: float = Field(default=1.0, description="Detection confidence 0.0 - 1.0")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Detection confidence, if provided by the model")
 
 
 class MusicalTimeline(BaseModel):
@@ -37,6 +52,9 @@ class MusicalTimeline(BaseModel):
     beats: List[float] = Field(description="Beat timestamps in seconds")
     downbeats: List[float] = Field(description="Downbeat / bar start timestamps in seconds")
     sections: List[TimelineSection] = Field(default_factory=list)
+    backend: Optional[str] = None
+    model: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class TrackAnalysis(BaseModel):

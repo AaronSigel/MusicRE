@@ -7,10 +7,10 @@ MusicRE is a local-first Python application, CLI, and MCP server for music decom
 ## Architecture & Principles
 
 - **Zero-Reinvention:** Leverages best-in-class upstream ML libraries (Demucs, Basic Pitch, Librosa, PrettyMIDI) via modular adapter interfaces without custom neural training.
-- **API-First & Modular:** S換eable engine interfaces (`SeparatorBackend`, `StructureAnalyzerBackend`, `TranscriberBackend`) with runtime device selection (`cpu`, `cuda`, `auto`).
+- **API-First & Modular:** Swappable engine interfaces (`SeparatorBackend`, `StructureAnalyzerBackend`, `TranscriberBackend`) with runtime device selection (`cpu`, `cuda`, `auto`). CLI and MCP use the same pipeline service.
 - **Deterministic & Resumable:** Workspaces indexed by SHA-256 streaming content hashes. Atomic writes and `manifest.json` state tracking prevent corrupted caches and redundant processing.
 - **Dynamic Time Alignment:** Note events and drum onsets snap to dynamic beat and bar grids (`timeline.json`), preventing tempo drift across long tracks.
-- **Honest Evaluation:** Two-tier evaluation (`quality_report.json`) separates objective metrics (SDR/SIR/SAR and note onset F1 when ground truth is provided) from non-fabricated diagnostic heuristics.
+- **Honest Evaluation:** `museval` BSSEval v4 SDR/ISR/SIR/SAR and `mir_eval` pitch+onset/offset scores require actual reference comparisons. Each metric group reports its mode and coverage. Missing comparisons and undefined scores are not successes.
 
 ---
 
@@ -18,7 +18,7 @@ MusicRE is a local-first Python application, CLI, and MCP server for music decom
 
 1. **Audio Ingestion & Normalization:** Unified FFmpeg decoding to 32-bit float PCM with peak normalization to -1.0 dBFS and sample-exact duration preservation.
 2. **Stem Separation:** 4-stem (`htdemucs`: vocals, drums, bass, other) and 6-stem (`htdemucs_6s`: + guitar, piano) with memory management (`unload()` cache clearing).
-3. **Structure Analysis:** BPM, beat timestamps, downbeats (bars), and contiguous section boundaries (intro, verse, chorus, bridge, outro) saved to `timeline.json`.
+3. **Structure Analysis:** All-In-One-Infer (`allin1_infer`, pinned in the lock) supplies neural beats, downbeats, and section labels while reusing the existing stems. Librosa is a baseline: labels are `unknown`, confidence is `null`, and downbeats are unavailable. Unreported neural confidence is also `null`.
 4. **MIDI Transcription:**
    - Melodic stems: Basic Pitch ONNX runtime polyphonic transcription with pitch-group overlap deduplication.
    - Percussion: Multi-band frequency energy detection (Kick MIDI 36, Snare MIDI 38, Hi-Hat MIDI 42).
@@ -36,7 +36,8 @@ Requires **Python 3.11** and **FFmpeg** installed in your system PATH.
 # Clone and install using uv (recommended)
 git clone https://github.com/AaronSigel/MusicRE.git
 cd MusicRE
-uv sync
+uv sync --locked --extra dev
+uv run --locked pytest -m 'not models and not real_e2e' -q
 ```
 
 ---
@@ -46,7 +47,7 @@ uv sync
 ### Full End-to-End Deconstruction
 ```bash
 # Run full reverse engineering pipeline (split -> analyze -> structure -> midi -> evaluate)
-uv run music-re deconstruct input.mp3
+uv run --locked music-re deconstruct input.mp3 --cache-root ./data/cache
 
 # Use GPU acceleration and 6-stem model
 uv run music-re deconstruct input.flac --six-stems --device cuda --profile quality
@@ -68,6 +69,8 @@ uv run music-re structure song.wav [--backend auto|librosa|allin1] [--json]
 
 # Transcribe isolated stem to MIDI with timeline synchronization
 uv run music-re to-midi vocals.wav --mode tonal --timeline timeline.json --grid 4
+# Keep original endings while snapping starts:
+uv run music-re to-midi vocals.wav --grid 8 --onsets-only
 uv run music-re to-midi drums.wav --mode drums --timeline timeline.json
 
 # Inspect MIDI notes by bars for LLM reasoning
@@ -116,9 +119,32 @@ uv run music-re-mcp
 
 ---
 
+## Execution profiles and result states
+
+| Setting | fast | balanced | quality |
+| --- | --- | --- | --- |
+| Stems | 4 | requested 4/6 | requested 4/6 |
+| Demucs shifts / overlap | 0 / 0.1 | 1 / 0.25 | 2 / 0.5 |
+| Structure | Librosa baseline | Harmonix fold 0 | Harmonix 8-fold ensemble |
+| Raw MIDI / diagnostics | no / no | yes / yes | yes / yes |
+| Grid / note endings | 4 subdivisions / snapped | 4 / snapped | 4 / snapped |
+
+These are compute policies, not measured quality guarantees. Neural inference failure is an error, not a silent baseline fallback. `structure --backend auto` only falls back when the neural package itself is absent. The standard locked install includes it.
+
+Transcription results distinguish `notes` and successful `no_notes`; missing/corrupt model output raises an error. MCP `transcribe_stem` returns structured result metadata instead of a path string. The manifest records settings, packages, model IDs, available checkpoint SHA-256 values, stage fingerprints, checksums, and per-stem result states. Changing settings invalidates dependent stages; old unversioned runs are not trusted for resumption.
+
+Export requires a completed, valid active artifact set. Its profile must match the run profile. It refuses existing destinations and partial/corrupt workspaces. Bundled artifact paths are relative; original input location remains provenance. Stale raw MIDI from earlier runs is not included.
+
+Diagnostics are not accuracy scores. `rms_to_p10_amplitude_db` is an amplitude-distribution statistic, **not SNR**. Undefined dB values are `null`. Reference separation uses fixed source order, whole-track BSSEval v4 frames at 22,050 Hz, no source permutation, and rejects mismatched shapes. Pitched transcription uses 50 ms onset tolerance, 50 cents pitch tolerance, and optional offsets within 20% or 50 ms. GM drums are scored separately by onset and pitch, without offsets.
+
+## Verification
+
+CI runs the locked CPU suite without downloaded-weight tests. Run those explicitly with `uv run --locked pytest -m models -q`. Real-model acceptance requires FFmpeg, model downloads, an MP3 whose use is permitted, and separate CLI/MCP caches; it is not established by synthetic or mocked tests. See `docs/verification/` for executed evidence and limitations.
+
 ## Licenses & Pretrained Weights
 
-- **Code:** Licensed under the [MIT License](LICENSE).
+- **Code:** Licensed under [Apache 2.0](LICENSE).
 - **Basic Pitch:** Apache 2.0 (code and ONNX weights open for commercial use).
-- **Demucs Pretrained Weights (`htdemucs` / `htdemucs_6s`):** Pretrained on Musdb-HQ under **CC-BY-NC 4.0** (non-commercial research/personal use only).
-- **Candidate Models:** Check dataset licenses prior to commercial deployment.
+- **Demucs:** [Upstream states MIT](https://github.com/facebookresearch/demucs#license). Exact checkpoint commercial-use rights are not independently verified here. Do not infer a checkpoint license solely from a training dataset license.
+- **All-In-One-Infer:** [MIT code](https://github.com/openmirlab/all-in-one-infer); review exact Harmonix checkpoints and transitive dependencies separately.
+- Input recordings, dataset rights, code licenses, and weight licenses are separate checks. `scripts/audit_licenses.py` records metadata and unresolved items, not legal clearance.

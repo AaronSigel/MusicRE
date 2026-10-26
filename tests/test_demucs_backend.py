@@ -20,6 +20,7 @@ def test_demucs_backend_metadata_six_stems():
     assert hasattr(sep, "quality_note")
     assert "bleed" in sep.quality_note.lower()
 
+@pytest.mark.models
 def test_demucs_backend_load_and_unload():
     sep = DemucsSeparator(six_stems=False, device="cpu")
     assert sep._model is None
@@ -35,7 +36,7 @@ def test_demucs_backend_load_and_unload():
 
 def test_demucs_backend_separate_mock(tmp_path: Path):
     sr = 44100
-    y = np.zeros(sr, dtype=np.float32)
+    y = np.zeros((sr * 3 + 123, 2), dtype=np.float32)
     silent_wav = tmp_path / "silent.wav"
     sf.write(str(silent_wav), y, sr)
 
@@ -47,3 +48,8 @@ def test_demucs_backend_separate_mock(tmp_path: Path):
     for stem_name, path in results.items():
         assert Path(path).exists()
         assert Path(path).stat().st_size > 0
+        signal, rate = sf.read(path, always_2d=True)
+        assert rate == sr
+        assert signal.shape == (sr * 3 + 123, 2)
+        assert not signal.any()
+    assert sep._model is None

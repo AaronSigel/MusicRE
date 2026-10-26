@@ -1,4 +1,5 @@
 import contextlib
+import copy
 from pathlib import Path
 import shutil
 import sys
@@ -6,9 +7,9 @@ import tempfile
 from typing import Optional, Union
 import pretty_midi
 
-from music_re.core.backends.transcriber_base import TranscriberBackend
-from music_re.core.midi_quantize import quantize_to_timeline
-from music_re.schemas import MusicalTimeline
+from music_re.core.backends.transcriber_base import TranscriberBackend, save_transcription
+from music_re.core.midi_quantize import quantize_to_timeline, build_quantize_grid
+from music_re.schemas import MusicalTimeline, TranscriptionResult
 
 
 class BasicPitchTranscriber(TranscriberBackend):
@@ -25,7 +26,10 @@ class BasicPitchTranscriber(TranscriberBackend):
         bpm: float = 120.0,
         quantize: bool = True,
         save_raw: bool = True,
-    ) -> Path:
+        grid_subdivisions: int = 4,
+        quantize_ends: bool = True,
+    ) -> TranscriptionResult:
+        build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
         in_p = Path(audio_path).resolve()
         out_p = Path(output_midi_path).resolve()
         out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -38,10 +42,8 @@ class BasicPitchTranscriber(TranscriberBackend):
             effective_bpm = 120.0
 
         from basic_pitch.inference import predict_and_save
-        from basic_pitch import ICASSP_2022_MODEL_PATH
-
-        onnx_path = Path(str(ICASSP_2022_MODEL_PATH) + ".onnx")
-        model_to_use = str(onnx_path) if onnx_path.exists() else ICASSP_2022_MODEL_PATH
+        from basic_pitch import build_icassp_2022_model_path, FilenameSuffix
+        model_to_use = build_icassp_2022_model_path(FilenameSuffix.onnx)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_dir_path = Path(tmp_dir)
@@ -59,31 +61,23 @@ class BasicPitchTranscriber(TranscriberBackend):
                 )
 
             generated_midis = list(tmp_dir_path.glob("*.mid"))
-            if not generated_midis:
-                pm = pretty_midi.PrettyMIDI(initial_tempo=effective_bpm)
-                pm.instruments.append(pretty_midi.Instrument(program=0))
-                pm.write(str(out_p))
-                if save_raw:
-                    raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
-                    pm.write(str(raw_out_p))
-                return out_p
+            if len(generated_midis) != 1:
+                raise RuntimeError('Basic Pitch did not produce exactly one MIDI output')
 
             raw_midi = generated_midis[0]
 
-            if save_raw:
-                raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
-                shutil.copy2(str(raw_midi), str(raw_out_p))
-
             pm = pretty_midi.PrettyMIDI(str(raw_midi), initial_tempo=effective_bpm)
+            raw_pm = copy.deepcopy(pm) if save_raw else None
 
             if quantize:
                 pm = quantize_to_timeline(
                     pm=pm,
                     timeline=timeline,
                     bpm=effective_bpm,
-                    grid_subdivisions=4,
+                    grid_subdivisions=grid_subdivisions,
+                    quantize_ends=quantize_ends,
                 )
 
-            pm.write(str(out_p))
-
-        return out_p
+            return save_transcription(pm, out_p, raw_pm, self.backend_name,
+                                      dict(grid_subdivisions=grid_subdivisions, quantize_ends=quantize_ends,
+                                           model='icassp_2022/nmp.onnx'))

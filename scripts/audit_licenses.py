@@ -21,14 +21,19 @@ PACKAGES = [
     "rich",
     "mcp",
     "pydantic",
+    "all-in-one-infer",
+    "demucs-infer",
+    "madmom-infer",
+    "mir-eval",
+    "museval",
 ]
 
 MODEL_WEIGHT_LICENSES = {
     "demucs (htdemucs / mdx)": {
-        "license": "CC-BY-NC 4.0 (Non-Commercial for official weights trained on Musdb-HQ)",
+        "license": "MIT repository license; checkpoint-specific rights not independently verified",
         "source": "https://github.com/facebookresearch/demucs#license",
-        "commercial_use": False,
-        "notes": "Code is MIT, but default pretrained weights are non-commercial due to Musdb-HQ license."
+        "commercial_use": "not verified",
+        "notes": "Upstream states MIT. A training dataset license is not by itself a checkpoint license. Review exact weights and input rights before deployment."
     },
     "basic-pitch (ICASSP 2022)": {
         "license": "Apache 2.0",
@@ -36,11 +41,11 @@ MODEL_WEIGHT_LICENSES = {
         "commercial_use": True,
         "notes": "Code and provided ONNX weights are Apache 2.0."
     },
-    "all-in-one-infer (candidate)": {
-        "license": "MIT / Mixed dependencies",
-        "source": "https://github.com/mir-aidj/all-in-one-infer",
-        "commercial_use": "Conditional",
-        "notes": "Pulls demucs-infer and madmom-infer. Check model checkpoint licenses (Harmonic-CNN, etc.)."
+    "all-in-one-infer": {
+        "license": "MIT code; exact Harmonix checkpoint rights not independently verified",
+        "source": "https://github.com/openmirlab/all-in-one-infer",
+        "commercial_use": "not verified",
+        "notes": "Uses taejunkim/allinone checkpoints and demucs-infer/madmom-infer. Inspect each dependency and checkpoint license separately."
     }
 }
 

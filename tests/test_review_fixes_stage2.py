@@ -10,15 +10,11 @@ from music_re.workspace import WorkspaceManager
 
 
 def test_stem_separation_result_has_quality_note(tmp_path: Path):
+    import numpy as np
+    import soundfile as sf
     ws = WorkspaceManager(cache_root=tmp_path / "cache")
     track_file = tmp_path / "song.wav"
-    track_file.write_bytes(b"TEST_AUDIO_FOR_QUALITY_NOTE")
-
-    # Simulate 6-stem cache
-    stems_dir = ws.get_stems_dir(track_file, model_name="htdemucs_6s")
-    for s in ["vocals", "drums", "bass", "other", "guitar", "piano"]:
-        (stems_dir / f"{s}.wav").write_bytes(b"RIFF\x00\x00")
-    (stems_dir / ".complete_htdemucs_6s").write_text("ok")
+    sf.write(track_file, np.zeros(44100), 44100)
 
     res = separate_stems(track_file, workspace=ws, six_stems=True)
     assert isinstance(res, StemSeparationResult)

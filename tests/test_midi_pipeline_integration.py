@@ -29,11 +29,14 @@ def test_cli_to_midi_with_timeline(tmp_path: Path):
     tl_file = ws.save_timeline(stem_wav, tl)
 
     out_midi = tmp_path / "vocals_test.mid"
-    res = runner.invoke(app, ["to-midi", str(stem_wav), "--out", str(out_midi), "--timeline", str(tl_file)])
+    res = runner.invoke(app, ["to-midi", str(stem_wav), "--out", str(out_midi), "--timeline", str(tl_file), '--grid', '0'])
+    assert res.exit_code != 0
+    assert not out_midi.exists()
+    res = runner.invoke(app, ["to-midi", str(stem_wav), "--out", str(out_midi), "--timeline", str(tl_file), '--grid', '8', '--onsets-only'])
     assert res.exit_code == 0
     assert out_midi.exists()
 
-def test_deconstruct_generates_all_stems_project(tmp_path: Path):
+def test_deconstruct_generates_all_stems_project(tmp_path: Path, seed_stem_cache):
     sr = 22050
     t = np.linspace(0, 2.0, sr * 2, endpoint=False)
     y = 0.4 * np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
@@ -44,14 +47,14 @@ def test_deconstruct_generates_all_stems_project(tmp_path: Path):
     track_dir = ws.get_track_dir(track_wav)
 
     # Mock separation to avoid heavy Demucs in unit test
-    stems_dir = ws.get_stems_dir(track_wav, model_name="htdemucs")
+    stems_dir = ws.get_stems_dir(track_wav, model_name="htdemucs_s0_o0.1")
     for s in ["vocals", "drums", "bass", "other"]:
         sf.write(str(stems_dir / f"{s}.wav"), y, sr)
-    (stems_dir / ".complete_htdemucs").write_text("ok")
+    seed_stem_cache(track_wav, {s: str(stems_dir / f'{s}.wav') for s in ['vocals', 'drums', 'bass', 'other']}, shifts=0, overlap=.1)
 
     with patch("music_re.cli.WorkspaceManager", return_value=ws):
-        res = runner.invoke(app, ["deconstruct", str(track_wav)])
-        assert res.exit_code == 0
+        res = runner.invoke(app, ["deconstruct", str(track_wav), '--profile', 'fast'])
+        assert res.exit_code == 0, res.output
 
     all_stems_mid = track_dir / "midis" / "all_stems.mid"
     assert all_stems_mid.exists()

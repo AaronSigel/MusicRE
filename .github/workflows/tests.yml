@@ -1,0 +1,21 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.14'
+          enable-cache: true
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: uv sync --locked --extra dev
+      - run: uv run --locked python -c "import torch, torchaudio, allin1_infer, mir_eval, museval"
+      - run: uv run --locked pytest -m 'not models and not real_e2e' -q
+        env:
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+          TF_CPP_MIN_LOG_LEVEL: '3'

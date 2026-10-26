@@ -66,8 +66,8 @@ def verify_model_loading(load_weights: bool = False) -> Dict[str, Any]:
 
     # 2. Basic Pitch
     try:
-        from basic_pitch import ICASSP_2022_MODEL_PATH
-        onnx_model_path = Path(str(ICASSP_2022_MODEL_PATH) + ".onnx")
+        from basic_pitch import build_icassp_2022_model_path, FilenameSuffix
+        onnx_model_path = build_icassp_2022_model_path(FilenameSuffix.onnx)
         exists = onnx_model_path.exists()
         if load_weights:
             import onnxruntime as ort

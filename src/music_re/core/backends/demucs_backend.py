@@ -24,6 +24,8 @@ class DemucsSeparator(SeparatorBackend):
         model_name = "htdemucs_6s" if six_stems else "htdemucs"
         super().__init__(backend_name="demucs", model_name=model_name, device=device)
         self.six_stems = six_stems
+        self.shifts = kwargs.get('shifts', 1)
+        self.overlap = kwargs.get('overlap', .25)
         self._model = None
         self.quality_note = (
             "6-stem mode (htdemucs_6s) carries noticeable acoustic bleed between guitar and piano."
@@ -92,7 +94,7 @@ class DemucsSeparator(SeparatorBackend):
             if wav_raw.abs().max() < 1e-5:
                 if progress_callback:
                     progress_callback("Audio is silent; generating zero-signal stems.")
-                zero_sig = torch.zeros((2, 44100), dtype=torch.float32)
+                zero_sig = torch.zeros_like(wav_raw)
                 results = {}
                 for name in self.supported_stems:
                     target_path = out_d / f"{name}.wav"
@@ -116,7 +118,8 @@ class DemucsSeparator(SeparatorBackend):
             wav = (wav_raw - ref.mean()) / std
 
             with torch.no_grad():
-                sources = apply_model(self._model, wav[None].to(self.device))[0]
+                sources = apply_model(self._model, wav[None].to(self.device), shifts=self.shifts,
+                                      overlap=self.overlap, device=self.device)[0]
                 sources = sources * std.to(self.device) + ref.mean().to(self.device)
 
             results = {}

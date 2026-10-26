@@ -10,56 +10,9 @@ from music_re.schemas import MusicalTimeline, QualityReport, TimelineSection
 from music_re.workspace import WorkspaceManager
 
 @pytest.fixture
-def populated_workspace(tmp_path: Path):
-    ws = WorkspaceManager(cache_root=tmp_path / "cache")
-    track_wav = tmp_path / "track.wav"
-    sr = 22050
-    t = np.linspace(0, 1.0, sr, endpoint=False)
-    y = 0.5 * np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
-    sf.write(str(track_wav), y, sr)
-
-    # 1. Stems
-    stems_dir = ws.get_stems_dir(track_wav, model_name="htdemucs")
-    stems = {}
-    for s in ["vocals", "drums", "bass", "other"]:
-        sf.write(str(stems_dir / f"{s}.wav"), y * 0.25, sr)
-        stems[s] = str(stems_dir / f"{s}.wav")
-    (stems_dir / ".complete_htdemucs").write_text("ok")
-    ws.mark_stage_complete(track_wav, "separation", artifacts=stems)
-
-    # 2. Timeline
-    tl = MusicalTimeline(
-        duration_sec=1.0,
-        bpm=120.0,
-        beats=[0.0, 0.5, 1.0],
-        downbeats=[0.0],
-        sections=[TimelineSection(label="intro", start_sec=0.0, end_sec=1.0, confidence=1.0)],
-    )
-    ws.save_timeline(track_wav, tl)
-
-    # 3. MIDIs
-    midis_dir = ws.get_track_dir(track_wav) / "midis"
-    midis_dir.mkdir(parents=True, exist_ok=True)
-    midis = {}
-    for s in ["vocals", "drums", "bass", "other", "all_stems"]:
-        p = midis_dir / f"{s}.mid"
-        pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
-        pm.instruments.append(pretty_midi.Instrument(program=0))
-        pm.write(str(p))
-        midis[s] = str(p)
-    ws.mark_stage_complete(track_wav, "transcription", artifacts=midis)
-
-    # 4. Quality Report
-    qr = QualityReport(
-        is_objective=False,
-        separation_metrics={"residual_reconstruction_db": -24.5},
-        transcription_metrics={"total_notes": 12},
-        audio_diagnostics={"peak_dbfs": -1.0},
-        evaluated_at="2026-10-26T12:00:00Z",
-    )
-    ws.save_quality_report(track_wav, qr)
-
-    return ws, track_wav
+def populated_workspace(tmp_path: Path, complete_workspace):
+    # Use a fully registered fixture; files alone do not constitute completion.
+    return complete_workspace
 
 def test_export_bundle_directory(tmp_path: Path, populated_workspace):
     ws, track_wav = populated_workspace
@@ -87,3 +40,96 @@ def test_export_bundle_zip_archive(tmp_path: Path, populated_workspace):
         assert any("manifest.json" in n for n in names)
         assert any("quality_report.json" in n for n in names)
         assert any("all_stems.mid" in n for n in names)
+
+
+def test_empty_workspace_cannot_export(tmp_path):
+    ws = WorkspaceManager(tmp_path / 'cache')
+    audio = tmp_path / 'song.wav'
+    sf.write(audio, np.zeros(22050), 22050)
+    out = tmp_path / 'out'
+    with pytest.raises(ValueError, match='Incomplete'):
+        export_bundle(ws, audio, out)
+    assert not out.exists()
+
+
+@pytest.mark.parametrize('artifact', ['stem', 'midi', 'timeline', 'quality'])
+def test_missing_required_artifact_fails_before_export(populated_workspace, tmp_path, artifact):
+    ws, audio = populated_workspace
+    m = ws.get_manifest(audio)
+    paths = {'stem': m.stems['vocals'], 'midi': m.midis['all_stems'],
+             'timeline': ws.get_timeline_path(audio), 'quality': ws.get_quality_report_path(audio)}
+    Path(paths[artifact]).unlink()
+    out = tmp_path / 'incomplete'
+    with pytest.raises(ValueError, match='Incomplete'):
+        export_bundle(ws, audio, out)
+    assert not out.exists()
+
+
+def test_bundle_manifest_is_portable(populated_workspace, tmp_path):
+    import json
+    ws, audio = populated_workspace
+    out = export_bundle(ws, audio, tmp_path / 'portable')
+    manifest = json.loads((out / 'manifest.json').read_text())
+    assert manifest['stems']['vocals'] == 'stems/vocals.wav'
+    assert manifest['midis']['all_stems'] == 'midis/all_stems.mid'
+
+
+def test_profile_mismatch_rejected(populated_workspace, tmp_path):
+    ws, audio = populated_workspace
+    with pytest.raises(ValueError, match='profile'):
+        export_bundle(ws, audio, tmp_path / 'wrong', profile='fast')
+
+
+def test_export_never_merges_into_existing_directory(populated_workspace, tmp_path):
+    ws, audio = populated_workspace
+    out = tmp_path / 'existing'
+    out.mkdir()
+    (out / 'keep').write_text('user file')
+    with pytest.raises(ValueError, match='exists'):
+        export_bundle(ws, audio, out)
+    assert (out / 'keep').read_text() == 'user file'
+
+
+@pytest.mark.parametrize('problem', ['corrupt_midi', 'incomplete_stage', 'bad_state'])
+def test_invalid_bundle_content_rejected(populated_workspace, tmp_path, problem):
+    ws, audio = populated_workspace
+    m = ws.get_manifest(audio)
+    if problem == 'corrupt_midi':
+        Path(m.midis['vocals']).write_bytes(b'bad')
+    elif problem == 'incomplete_stage':
+        m.completed_stages.remove('structure')
+    else:
+        m.transcription_results['vocals']['status'] = 'notes'
+    ws.save_manifest(audio, m)
+    with pytest.raises(ValueError, match='Incomplete'):
+        export_bundle(ws, audio, tmp_path / 'invalid')
+
+
+def test_stale_raw_midi_is_not_exported(populated_workspace, tmp_path):
+    ws, audio = populated_workspace
+    (ws.get_track_dir(audio) / 'midis' / 'guitar_raw.mid').write_bytes(b'old')
+    out = export_bundle(ws, audio, tmp_path / 'clean')
+    assert not (out / 'midis' / 'guitar_raw.mid').exists()
+
+
+def test_zip_suffix_cannot_overwrite_source(tmp_path):
+    ws = WorkspaceManager(tmp_path / 'cache')
+    source = tmp_path / 'song.zip'
+    source.write_bytes(b'user input')
+    with pytest.raises(ValueError, match='overwrite source'):
+        export_bundle(ws, source, tmp_path / 'song.any', archive=True)
+    assert source.read_bytes() == b'user input'
+
+
+def test_exports_are_stable_across_python_hash_seeds(complete_workspace, tmp_path):
+    import os
+    import subprocess
+    import sys
+    ws, source = complete_workspace
+    outputs = [tmp_path / 'seed1', tmp_path / 'seed2']
+    for seed, out in zip(['1', '2'], outputs):
+        code = ('from music_re.workspace import WorkspaceManager; '
+                'from music_re.core.export import export_bundle; '
+                f'export_bundle(WorkspaceManager({str(ws.cache_root)!r}), {str(source)!r}, {str(out)!r})')
+        subprocess.run([sys.executable, '-c', code], env={**os.environ, 'PYTHONHASHSEED': seed}, check=True)
+    assert (outputs[0] / 'manifest.json').read_bytes() == (outputs[1] / 'manifest.json').read_bytes()

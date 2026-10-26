@@ -29,6 +29,8 @@ def sample_workspace_for_quality(tmp_path: Path):
     inst.notes.append(pretty_midi.Note(velocity=100, pitch=60, start=0.0, end=0.5))
     pm.instruments.append(inst)
     pm.write(str(midis_dir / "vocals.mid"))
+    ws.mark_stage_complete(track_wav, 'separation', {s: str(stems_dir / f'{s}.wav') for s in ['vocals', 'drums', 'bass', 'other']})
+    ws.mark_stage_complete(track_wav, 'transcription', {'vocals': str(midis_dir / 'vocals.mid')})
 
     return ws, track_wav
 
@@ -59,8 +61,10 @@ def test_quality_evaluation_with_ground_truth(tmp_path: Path, sample_workspace_f
     gt_dir.mkdir(parents=True, exist_ok=True)
     sr = 22050
     y = 0.5 * np.sin(2 * np.pi * 440.0 * np.linspace(0, 1.0, sr, endpoint=False)).astype(np.float32)
+    rng = np.random.default_rng(10)
     for s in ["vocals", "drums", "bass", "other"]:
-        sf.write(str(gt_dir / f"{s}.wav"), y * 0.25, sr)
+        # Non-identical, non-silent references yield finite BSSEval scores.
+        sf.write(str(gt_dir / f"{s}.wav"), y * 0.25 + rng.normal(0, .01, len(y)), sr)
 
     report = evaluate_quality(ws, track_wav, ground_truth_stems=gt_dir)
     assert report.is_objective is True

@@ -16,6 +16,7 @@ def test_quantize_static_bpm_fallback():
     assert len(quantized.instruments[0].notes) == 1
     note = quantized.instruments[0].notes[0]
     assert note.start == pytest.approx(0.125, abs=1e-3)
+    assert note.end == pytest.approx(0.375, abs=1e-3)
     assert note.end >= note.start + 0.05
 
 def test_quantize_dynamic_timeline_drifty_beats():
@@ -76,3 +77,27 @@ def test_quantize_caps_at_timeline_duration():
     assert len(notes) == 1
     assert notes[0].end <= 2.0 + 1e-4
     assert notes[0].start < 2.0
+
+
+def test_pickup_and_duplicate_beats():
+    from music_re.core.midi_quantize import build_quantize_grid
+    tl = MusicalTimeline(duration_sec=3, bpm=120, beats=[1, 1, 1.5, 2], downbeats=[])
+    grid = build_quantize_grid(tl, grid_subdivisions=4, max_duration=3)
+    assert 0.0 in grid and 0.125 in grid
+    assert all(b > a for a, b in zip(grid, grid[1:]))
+
+
+@pytest.mark.parametrize('subdivisions', [0, -1, 1.5])
+def test_invalid_grid_rejected(subdivisions):
+    from music_re.core.midi_quantize import build_quantize_grid
+    with pytest.raises(ValueError, match='subdivisions'):
+        build_quantize_grid(grid_subdivisions=subdivisions)
+
+
+def test_onset_only_keeps_original_end():
+    pm = pretty_midi.PrettyMIDI()
+    inst = pretty_midi.Instrument(0)
+    inst.notes = [pretty_midi.Note(100, 60, .11, .4)]
+    pm.instruments.append(inst)
+    result = quantize_to_timeline(pm, quantize_ends=False)
+    assert result.instruments[0].notes[0].end == .4

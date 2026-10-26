@@ -40,7 +40,7 @@ def test_stage1_multi_format_decoding(multi_stem_audio):
     assert y_flac.dtype == np.float32
     assert 0.88 <= np.max(np.abs(y_flac)) <= 0.90
 
-def test_stage1_e2e_workspace_pipeline(tmp_path: Path):
+def test_stage1_e2e_workspace_pipeline(tmp_path: Path, seed_stem_cache):
     sr = 22050
     duration_sec = 3.0
     t = np.linspace(0, duration_sec, int(sr * duration_sec), endpoint=False)
@@ -62,7 +62,7 @@ def test_stage1_e2e_workspace_pipeline(tmp_path: Path):
         stem_f = stems_dir / f"{name}.wav"
         sf.write(str(stem_f), y, sr)
         mock_stems[name] = str(stem_f)
-    (stems_dir / ".complete_htdemucs").write_text("ok")
+    seed_stem_cache(track_p, mock_stems)
 
     sep_res = separate_stems(track_p, workspace=ws, six_stems=False)
     assert sep_res.model_used == "htdemucs"

@@ -69,9 +69,11 @@ def get_structure_analyzer(name: str = "auto", **kwargs) -> StructureAnalyzerBac
     if key == "auto":
         # Prefer All-In-One if installed, fallback to Librosa
         try:
-            import allin1
+            import allin1_infer
             return _STRUCTURE_REGISTRY["allin1"](**kwargs)
-        except (ImportError, KeyError):
+        except ModuleNotFoundError as e:
+            if e.name != 'allin1_infer':
+                raise
             return _STRUCTURE_REGISTRY["librosa"](**kwargs)
 
     if key not in _STRUCTURE_REGISTRY:

@@ -7,9 +7,6 @@ from music_re.core.audio_io import decode_audio
 from music_re.core.backends.structure_base import StructureAnalyzerBackend
 from music_re.schemas import MusicalTimeline, TimelineSection
 
-SECTION_NAMES = ["intro", "verse", "chorus", "verse", "chorus", "bridge", "chorus", "outro"]
-
-
 class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
     """Pure Librosa baseline structure analyzer using spectral recurrence and beat tracking."""
 
@@ -31,7 +28,8 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
         if y_mix.ndim > 1:
             y_mix = np.mean(y_mix, axis=1)
 
-        duration_sec = round(float(len(y_mix) / sr), 2)
+        duration_sec = float(len(y_mix) / sr)
+        warnings = ["Baseline segmentation: semantic labels and downbeats are unavailable."]
         if duration_sec <= 0.0:
             return MusicalTimeline(
                 duration_sec=0.0,
@@ -60,11 +58,8 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
         beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
         beats = [round(float(t), 3) for t in beat_times if t <= duration_sec]
 
-        # 2. Downbeats: default 4/4 meter (every 4 beats)
-        if beats:
-            downbeats = [beats[i] for i in range(0, len(beats), 4)]
-        else:
-            downbeats = []
+        # Beat phase and meter are not identified by this baseline.
+        downbeats = []
 
         # 3. Structural segmentation
         sections: List[TimelineSection] = []
@@ -72,10 +67,9 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
             # Short sample: single section
             sections.append(
                 TimelineSection(
-                    label="intro",
+                    label="unknown",
                     start_sec=0.0,
                     end_sec=duration_sec,
-                    confidence=0.9,
                 )
             )
         else:
@@ -87,7 +81,7 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
                 features = np.vstack([mfcc, chroma])
 
                 # Target ~1 section per 16-24 seconds
-                n_segments = max(2, min(len(SECTION_NAMES), int(duration_sec // 18) + 1))
+                n_segments = max(2, min(8, int(duration_sec // 18) + 1))
                 bound_frames = librosa.segment.agglomerative(features, k=n_segments)
                 bound_times = librosa.frames_to_time(bound_frames, sr=sr, hop_length=hop_length).tolist()
 
@@ -102,22 +96,16 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
                 for idx in range(len(cut_points) - 1):
                     start = cut_points[idx]
                     end = cut_points[idx + 1]
-                    lbl = SECTION_NAMES[min(idx, len(SECTION_NAMES) - 1)]
                     sections.append(
                         TimelineSection(
-                            label=lbl,
+                            label="unknown",
                             start_sec=start,
                             end_sec=end,
-                            confidence=0.8,
                         )
                     )
-            except Exception:
-                # Fallback: divide into 2-3 even sections
-                mid = round(duration_sec / 2.0, 2)
-                sections = [
-                    TimelineSection(label="verse", start_sec=0.0, end_sec=mid, confidence=0.7),
-                    TimelineSection(label="chorus", start_sec=mid, end_sec=duration_sec, confidence=0.7),
-                ]
+            except Exception as e:
+                warnings.append(f"Segmentation unavailable: {e}")
+                sections = [TimelineSection(label="unknown", start_sec=0.0, end_sec=duration_sec)]
 
         return MusicalTimeline(
             duration_sec=duration_sec,
@@ -125,4 +113,6 @@ class LibrosaStructureAnalyzer(StructureAnalyzerBackend):
             beats=beats,
             downbeats=downbeats,
             sections=sections,
+            backend=self.backend_name,
+            warnings=warnings,
         )

@@ -37,8 +37,8 @@ def test_cli_evaluate_command(mock_audio_workspace):
         assert res_json.exit_code == 0
         assert '"is_objective"' in res_json.stdout
 
-def test_cli_export_command(tmp_path: Path, mock_audio_workspace):
-    ws, track_wav = mock_audio_workspace
+def test_cli_export_command(tmp_path: Path, complete_workspace):
+    ws, track_wav = complete_workspace
     out_dir = tmp_path / "final_export"
 
     with patch("music_re.cli.WorkspaceManager", return_value=ws):

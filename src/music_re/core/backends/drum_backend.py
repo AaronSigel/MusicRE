@@ -1,12 +1,13 @@
 from pathlib import Path
+import copy
 from typing import List, Optional, Tuple, Union
 import pretty_midi
 
-from music_re.core.backends.transcriber_base import TranscriberBackend
+from music_re.core.backends.transcriber_base import TranscriberBackend, save_transcription
 from music_re.core.midi_drums import _bandpass_filter, _detect_band_onsets
-from music_re.core.midi_quantize import quantize_to_timeline
+from music_re.core.midi_quantize import quantize_to_timeline, build_quantize_grid
 from music_re.core.audio_io import decode_audio
-from music_re.schemas import MusicalTimeline
+from music_re.schemas import MusicalTimeline, TranscriptionResult
 
 
 class DrumTranscriber(TranscriberBackend):
@@ -23,7 +24,11 @@ class DrumTranscriber(TranscriberBackend):
         bpm: float = 120.0,
         quantize: bool = True,
         save_raw: bool = True,
-    ) -> Path:
+        grid_subdivisions: int = 4,
+        quantize_ends: bool = True,
+    ) -> TranscriptionResult:
+        build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
+        parameters = dict(grid_subdivisions=grid_subdivisions, quantize_ends=quantize_ends)
         in_p = Path(audio_path).resolve()
         out_p = Path(output_midi_path).resolve()
         out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -47,11 +52,7 @@ class DrumTranscriber(TranscriberBackend):
         import numpy as np
         if len(y) <= 21 or np.max(np.abs(y)) < 1e-5:
             pm.instruments.append(drum_inst)
-            pm.write(str(out_p))
-            if save_raw:
-                raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
-                pm.write(str(raw_out_p))
-            return out_p
+            return save_transcription(pm, out_p, pm if save_raw else None, self.backend_name, parameters)
 
         # Multi-band frequency definitions:
         bands = [
@@ -82,18 +83,16 @@ class DrumTranscriber(TranscriberBackend):
 
         pm.instruments.append(drum_inst)
 
-        if save_raw:
-            raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
-            pm.write(str(raw_out_p))
+        raw_pm = copy.deepcopy(pm) if save_raw else None
 
         if quantize:
             pm = quantize_to_timeline(
                 pm=pm,
                 timeline=timeline,
                 bpm=effective_bpm,
-                grid_subdivisions=4,
+                grid_subdivisions=grid_subdivisions,
+                quantize_ends=quantize_ends,
                 min_duration=0.04,
             )
 
-        pm.write(str(out_p))
-        return out_p
+        return save_transcription(pm, out_p, raw_pm, self.backend_name, parameters)

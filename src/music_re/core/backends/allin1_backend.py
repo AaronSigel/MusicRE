@@ -1,80 +1,78 @@
+import contextlib
+import sys
+import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
+import numpy as np
+import soundfile as sf
+
+from music_re.core.audio_io import decode_audio
 from music_re.core.backends.separator_base import resolve_device
 from music_re.core.backends.structure_base import StructureAnalyzerBackend
 from music_re.schemas import MusicalTimeline, TimelineSection
 
 
 class AllInOneStructureAnalyzer(StructureAnalyzerBackend):
-    """Adapter for All-In-One-Infer neural structure analysis with Demucs stems reuse."""
+    """All-In-One-Infer adapter; all upstream intermediates are disposable."""
 
-    def __init__(self):
+    def __init__(self, model_name: str = "harmonix-all"):
         super().__init__(backend_name="allin1")
+        self.model_name = model_name
 
-    def analyze(
-        self,
-        audio_path: Union[Path, str],
-        stems: Optional[Dict[str, Union[Path, str]]] = None,
-        device: str = "auto",
-    ) -> MusicalTimeline:
+    def analyze(self, audio_path: Union[Path, str],
+                stems: Optional[Dict[str, Union[Path, str]]] = None,
+                device: str = "auto") -> MusicalTimeline:
         in_p = Path(audio_path).resolve()
         if not in_p.is_file():
             raise FileNotFoundError(f"Audio file not found: {in_p}")
+        import allin1_infer
 
-        try:
-            import allin1
-        except ImportError as e:
-            raise ImportError(
-                "all-in-one-infer is not installed. Install with `pip install all-in-one-infer` "
-                "or use the 'librosa' structure backend."
-            ) from e
+        audio, sr = decode_audio(in_p, target_sr=44100, normalize_db=None)
+        duration = len(audio) / sr
+        with tempfile.TemporaryDirectory(prefix="music-re-structure-") as temp:
+            root = Path(temp)
+            kwargs = dict(device=resolve_device(device), model=self.model_name,
+                          demix_dir=root / 'demix', spec_dir=root / 'spec',
+                          keep_byproducts=True, multiprocess=False)
+            if stems:
+                required = {'bass', 'drums', 'other', 'vocals'}
+                if not required.issubset(stems):
+                    raise ValueError(f"Missing structure stems: {sorted(required - stems.keys())}")
+                paths = {name: Path(stems[name]).resolve() for name in required}
+                # Six-source Demucs puts guitar/piano outside 'other'. Restore
+                # the four-source representation expected by the neural model.
+                extra = [stems[n] for n in ('guitar', 'piano') if n in stems]
+                if extra:
+                    other, rate = sf.read(paths['other'], dtype='float32', always_2d=True)
+                    for path in extra:
+                        signal, extra_rate = sf.read(path, dtype='float32', always_2d=True)
+                        if rate != extra_rate or signal.shape != other.shape:
+                            raise ValueError("Incompatible six-source stem shapes or sample rates")
+                        other += signal
+                    paths['other'] = root / 'other.wav'
+                    sf.write(paths['other'], other, rate, subtype='FLOAT')
+                kwargs['stems_input'] = [allin1_infer.StemsInput(**paths, identifier='track')]
+            else:
+                # Use our FFmpeg decoder for consistent MP3 timing.
+                decoded = root / 'input.wav'
+                sf.write(decoded, audio, sr, subtype='FLOAT')
+                kwargs['paths'] = [str(decoded)]
+            with contextlib.redirect_stdout(sys.stderr):
+                result = allin1_infer.analyze(**kwargs)
+            if isinstance(result, list):
+                if len(result) != 1:
+                    raise RuntimeError("All-In-One-Infer returned no result or multiple results")
+                result = result[0]
+            if result is None:
+                raise RuntimeError("All-In-One-Infer returned no result")
 
-        resolved_device = resolve_device(device)
-
-        # Reuse pre-separated Demucs stems directory if provided
-        demucs_dir = None
-        if stems and "vocals" in stems:
-            stem_sample = Path(stems["vocals"]).resolve()
-            if stem_sample.is_file():
-                # Directory containing the stems (e.g. <track_dir>/stems/htdemucs)
-                demucs_dir = stem_sample.parent
-
-        # Call All-In-One-Infer API
-        kwargs = {"device": resolved_device}
-        if demucs_dir and demucs_dir.is_dir():
-            kwargs["demucs_dir"] = str(demucs_dir)
-
-        result = allin1.analyze(paths=[str(in_p)], **kwargs)
-        if isinstance(result, list) and len(result) > 0:
-            res = result[0]
-        else:
-            res = result
-
-        beats = [round(float(b), 3) for b in getattr(res, "beats", [])]
-        downbeats = [round(float(d), 3) for d in getattr(res, "downbeats", [])]
-        bpm = round(float(getattr(res, "bpm", 120.0)), 2)
-
-        raw_segments = getattr(res, "segments", [])
-        sections: List[TimelineSection] = []
-        for seg in raw_segments:
-            sections.append(
-                TimelineSection(
-                    label=str(getattr(seg, "label", "segment")).lower(),
-                    start_sec=round(float(getattr(seg, "start", 0.0)), 3),
-                    end_sec=round(float(getattr(seg, "end", 0.0)), 3),
-                    confidence=1.0,
-                )
-            )
-
-        duration = beats[-1] if beats else 0.0
-        if sections and sections[-1].end_sec > duration:
-            duration = sections[-1].end_sec
-
-        return MusicalTimeline(
-            duration_sec=duration,
-            bpm=bpm,
-            beats=beats,
-            downbeats=downbeats,
-            sections=sections,
-        )
+        sections = [TimelineSection(label=str(seg.label).lower(),
+                                    start_sec=max(0.0, float(seg.start)),
+                                    end_sec=min(duration, float(seg.end)),
+                                    confidence=getattr(seg, 'confidence', None))
+                    for seg in result.segments if float(seg.start) < duration and float(seg.end) > 0]
+        return MusicalTimeline(duration_sec=duration, bpm=float(result.bpm),
+                               beats=[float(t) for t in result.beats if 0 <= t <= duration],
+                               downbeats=[float(t) for t in result.downbeats if 0 <= t <= duration],
+                               sections=sections, backend=self.backend_name, model=self.model_name)
