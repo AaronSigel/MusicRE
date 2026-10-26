@@ -40,10 +40,10 @@
 - Produces: `evaluate_quality(workspace, file_path, ground_truth_stems=None, ground_truth_midi=None) -> QualityReport`
 - Produces: `workspace.save_quality_report(...)` and `quality_report.json`
 
-- [ ] **Step 1: Write failing test in `tests/test_quality_evaluation.py` for objective and diagnostic evaluation**
-- [ ] **Step 2: Run `uv run pytest tests/test_quality_evaluation.py` and verify FAIL**
-- [ ] **Step 3: Implement `QualityReport` in `schemas.py`, evaluation logic in `quality.py`, and save methods in `workspace.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_quality_evaluation.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_quality_evaluation.py` for objective and diagnostic evaluation**
+- [x] **Step 2: Run `uv run pytest tests/test_quality_evaluation.py` and verify FAIL**
+- [x] **Step 3: Implement `QualityReport` in `schemas.py`, evaluation logic in `quality.py`, and save methods in `workspace.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_quality_evaluation.py` and verify PASS**
 
 ---
 
@@ -56,10 +56,10 @@
 **Interfaces:**
 - Produces: `export_bundle(workspace, file_path, target_dir, profile="balanced", archive=False) -> Path`
 
-- [ ] **Step 1: Write failing test in `tests/test_export_engine.py` validating exported directory structure and zip archive**
-- [ ] **Step 2: Run `uv run pytest tests/test_export_engine.py` and verify FAIL**
-- [ ] **Step 3: Implement `src/music_re/core/export.py` copying stems, midis, timeline.json, manifest.json, quality_report.json**
-- [ ] **Step 4: Run `uv run pytest tests/test_export_engine.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_export_engine.py` validating exported directory structure and zip archive**
+- [x] **Step 2: Run `uv run pytest tests/test_export_engine.py` and verify FAIL**
+- [x] **Step 3: Implement `src/music_re/core/export.py` copying stems, midis, timeline.json, manifest.json, quality_report.json**
+- [x] **Step 4: Run `uv run pytest tests/test_export_engine.py` and verify PASS**
 
 ---
 
@@ -73,10 +73,10 @@
 - Produces: CLI commands `music-re evaluate` and `music-re export`
 - Produces: CLI option `--profile [fast|balanced|quality]` in `deconstruct` and `export`
 
-- [ ] **Step 1: Write failing test in `tests/test_stage5_cli.py` testing evaluate and export CLI commands**
-- [ ] **Step 2: Run `uv run pytest tests/test_stage5_cli.py` and verify FAIL**
-- [ ] **Step 3: Implement CLI commands `evaluate` and `export` and profile wiring in `src/music_re/cli.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_stage5_cli.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_stage5_cli.py` testing evaluate and export CLI commands**
+- [x] **Step 2: Run `uv run pytest tests/test_stage5_cli.py` and verify FAIL**
+- [x] **Step 3: Implement CLI commands `evaluate` and `export` and profile wiring in `src/music_re/cli.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_stage5_cli.py` and verify PASS**
 
 ---
 
@@ -89,10 +89,10 @@
 **Interfaces:**
 - Produces: MCP tools `evaluate_quality`, `export_project`, `get_timeline`, `deconstruct_track`
 
-- [ ] **Step 1: Update `tests/test_mcp_server.py` to assert new MCP tools are registered and functional**
-- [ ] **Step 2: Run `uv run pytest tests/test_mcp_server.py` and verify FAIL**
-- [ ] **Step 3: Implement tool handlers in `src/music_re/mcp_server.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_mcp_server.py` and verify PASS**
+- [x] **Step 1: Update `tests/test_mcp_server.py` to assert new MCP tools are registered and functional**
+- [x] **Step 2: Run `uv run pytest tests/test_mcp_server.py` and verify FAIL**
+- [x] **Step 3: Implement tool handlers in `src/music_re/mcp_server.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_mcp_server.py` and verify PASS**
 
 ---
 
@@ -106,7 +106,7 @@
 - Consumes: Complete v1.0 pipeline
 - Produces: 100% green full test suite and complete documentation
 
-- [ ] **Step 1: Write comprehensive end-to-end release test in `tests/test_v1_e2e.py`**
-- [ ] **Step 2: Run `uv run pytest tests/test_v1_e2e.py` and verify PASS**
-- [ ] **Step 3: Update `README.md` with CLI and MCP guide, architecture, and licenses**
-- [ ] **Step 4: Run full pytest suite across all tests (87+ tests) and verify 100% green**
+- [x] **Step 1: Write comprehensive end-to-end release test in `tests/test_v1_e2e.py`**
+- [x] **Step 2: Run `uv run pytest tests/test_v1_e2e.py` and verify PASS**
+- [x] **Step 3: Update `README.md` with CLI and MCP guide, architecture, and licenses**
+- [x] **Step 4: Run full pytest suite across all tests (87+ tests) and verify 100% green**
