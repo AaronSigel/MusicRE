@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pretty_midi
@@ -6,6 +7,7 @@ import pytest
 import soundfile as sf
 
 from music_re.core.quality import evaluate_quality
+from music_re.core.quality_midi import transcription_quality
 from music_re.workspace import WorkspaceManager
 
 
@@ -21,6 +23,17 @@ def write_note(path, pitch=60):
     inst = pretty_midi.Instrument(0)
     inst.notes.append(pretty_midi.Note(100, pitch, .1, .6))
     pm.instruments.append(inst)
+    pm.write(str(path))
+
+
+def write_drum_note(path, pitch, start, append_to=None):
+    source = append_to if append_to is not None else path
+    if append_to is not None and Path(source).exists():
+        pm = pretty_midi.PrettyMIDI(str(source))
+    else:
+        pm = pretty_midi.PrettyMIDI()
+        pm.instruments.append(pretty_midi.Instrument(0, is_drum=True))
+    pm.instruments[0].notes.append(pretty_midi.Note(100, pitch, start, start + .3))
     pm.write(str(path))
 
 
@@ -72,6 +85,21 @@ def test_silence_report_has_strict_json_and_no_fake_snr(quality_workspace):
     assert 'snr_estimate_db' not in report.audio_diagnostics
     assert report.audio_diagnostics['rms_to_p10_amplitude_db'] is None
     json.dumps(report.model_dump(), allow_nan=False)
+
+
+def test_drum_class_breakdown_scores_kick_snare_separately(tmp_path):
+    reference, estimate = tmp_path / 'ref.mid', tmp_path / 'est.mid'
+    write_drum_note(reference, pitch=36, start=0.0)   # kick
+    write_drum_note(reference, pitch=38, start=1.0, append_to=reference)  # snare, missed by estimate
+    write_drum_note(estimate, pitch=36, start=0.0)     # matches the kick
+    write_drum_note(estimate, pitch=42, start=2.0, append_to=estimate)    # false-positive hihat
+
+    metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
+
+    assert metrics['drums_by_class']['kick']['f1'] == 1.0
+    assert metrics['drums_by_class']['snare']['f1'] == 0.0
+    assert metrics['drums_by_class']['hihat']['f1'] == 0.0
+    assert 'crash' not in metrics['drums_by_class']  # not present: zero notes either side
 
 
 def test_silent_reference_is_unavailable(quality_workspace, tmp_path):

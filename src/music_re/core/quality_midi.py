@@ -4,6 +4,11 @@ import mir_eval
 import numpy as np
 import pretty_midi
 
+# Mirrors the GM drum pitches drum_backend.py's DrumTranscriber already emits
+# (kick/snare/hihat bands), so the breakdown below scores the same classes
+# the current drum pipeline actually produces.
+DRUM_GM_PITCH_CLASSES = {'kick': 36, 'snare': 38, 'hihat': 42}
+
 
 def _notes(pm, drums):
     return [n for inst in pm.instruments if inst.is_drum == drums for n in inst.notes]
@@ -62,6 +67,16 @@ def transcription_quality(midis, ground_truth=None):
                 group.update({f'onset_pitch_offset_{k}': v
                               for k, v in _score(ref_notes, est_notes, offsets=True).items()})
             metrics[key] = group
+            if drums:
+                by_class = {}
+                for name, pitch in DRUM_GM_PITCH_CLASSES.items():
+                    ref_class = [n for n in ref_notes if n.pitch == pitch]
+                    est_class = [n for n in est_notes if n.pitch == pitch]
+                    if not ref_class and not est_class:
+                        continue
+                    by_class[name] = _score(ref_class, est_class, offsets=False)
+                if by_class:
+                    metrics['drums_by_class'] = by_class
             metrics['comparisons'] += 1
         if metrics['comparisons']:
             metrics['mode'] = 'objective_ground_truth'
