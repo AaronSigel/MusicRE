@@ -72,7 +72,9 @@ class AllInOneStructureAnalyzer(StructureAnalyzerBackend):
                                     end_sec=min(duration, float(seg.end)),
                                     confidence=getattr(seg, 'confidence', None))
                     for seg in result.segments if float(seg.start) < duration and float(seg.end) > 0]
-        return MusicalTimeline(duration_sec=duration, bpm=float(result.bpm),
+        # An undetected tempo is "unknown", not absent: 0.0 is the same
+        # sentinel pipeline.py already falls back from (bpm > 0 check).
+        return MusicalTimeline(duration_sec=duration, bpm=float(result.bpm) if result.bpm is not None else 0.0,
                                beats=[float(t) for t in result.beats if 0 <= t <= duration],
                                downbeats=[float(t) for t in result.downbeats if 0 <= t <= duration],
                                sections=sections, backend=self.backend_name, model=self.model_name)

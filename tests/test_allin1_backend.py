@@ -37,6 +37,18 @@ def test_allin1_uses_infer_api_and_keeps_stems(tmp_path, monkeypatch):
     assert all(sf.info(p).frames == 132300 for p in stems.values())
 
 
+def test_allin1_handles_undetected_bpm(tmp_path, monkeypatch):
+    audio = tmp_path / 'song.wav'
+    sf.write(audio, np.zeros(44100), 44100)
+
+    def analyze(*, paths, device, model, demix_dir, spec_dir, keep_byproducts, multiprocess):
+        return [SimpleNamespace(bpm=None, beats=[], downbeats=[], segments=[])]
+
+    monkeypatch.setitem(sys.modules, 'allin1_infer', SimpleNamespace(analyze=analyze))
+    timeline = AllInOneStructureAnalyzer().analyze(audio, device='cpu')
+    assert timeline.bpm == 0.0  # unknown tempo, same sentinel pipeline.py already treats as "unknown"
+
+
 def test_allin1_rejects_empty_result(tmp_path, monkeypatch):
     audio = tmp_path / 'song.wav'
     sf.write(audio, np.zeros(44100), 44100)

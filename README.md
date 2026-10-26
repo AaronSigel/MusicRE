@@ -141,6 +141,16 @@ Diagnostics are not accuracy scores. `rms_to_p10_amplitude_db` is an amplitude-d
 
 CI runs the locked CPU suite without downloaded-weight tests. Run those explicitly with `uv run --locked pytest -m models -q`. Real-model acceptance requires FFmpeg, model downloads, an MP3 whose use is permitted, and separate CLI/MCP caches; it is not established by synthetic or mocked tests. See `docs/verification/` for executed evidence and limitations.
 
+## Benchmarking against Slakh2100
+
+`scripts/fetch_slakh_subset.py` fetches a few tracks from BabySlakh (a 20-track subset of Slakh2100), `scripts/slakh_mapping.py` maps each track's per-stem MIDI and audio into MusicRE's four groups (`vocals`/`drums`/`bass`/`other`) and builds an aligned ground truth, and `scripts/run_quality_benchmarks.py` runs the real pipeline against that ground truth plus any `--real-track` files you point it at with no ground truth (manual review only), then writes `BenchmarkReport.json`/`BenchmarkReport.md` and a timestamped snapshot under `data/benchmarks/history/` for comparing later versions:
+
+```bash
+uv run python scripts/run_quality_benchmarks.py --real-track /path/to/your/own/track.mp3
+```
+
+The real BabySlakh download (882.8 MB) is opt-in: `MUSIC_RE_TEST_SLAKH=1 uv run --locked pytest -m dataset -q`. BabySlakh is CC-BY-4.0 (Manilow, Wichern, Seetharaman, Le Roux, *Cutting Music Source Separation Some Slakh*, WASPAA 2019); this repo fetches it on demand and never commits its audio. Known gap: Slakh has no sung-vocal stems, so the `vocals` group has no objective score from this dataset — only the real-track spot checks can speak to vocals.
+
 ## Licenses & Pretrained Weights
 
 - **Code:** Licensed under [Apache 2.0](LICENSE).

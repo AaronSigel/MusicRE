@@ -11,6 +11,8 @@ data/
 /hardware_verification.json
 /license_audit.json
 /benchmark_report.json
+/BenchmarkReport.json
+/BenchmarkReport.md
 docs/superpowers/
 docs/verification/
 .music_re_cache/
