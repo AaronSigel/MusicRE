@@ -38,10 +38,10 @@
 - Produces: `MusicalTimeline(duration_sec, bpm, beats, downbeats, sections)`
 - Produces: `WorkspaceManifest.timeline: Optional[Dict[str, Any]] = None`
 
-- [ ] **Step 1: Write failing test in `tests/test_timeline_schemas.py` validating timeline schemas**
-- [ ] **Step 2: Run `uv run pytest tests/test_timeline_schemas.py` and verify FAIL**
-- [ ] **Step 3: Implement `TimelineSection` and `MusicalTimeline` in `src/music_re/schemas.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_timeline_schemas.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_timeline_schemas.py` validating timeline schemas**
+- [x] **Step 2: Run `uv run pytest tests/test_timeline_schemas.py` and verify FAIL**
+- [x] **Step 3: Implement `TimelineSection` and `MusicalTimeline` in `src/music_re/schemas.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_timeline_schemas.py` and verify PASS**
 
 ---
 
@@ -56,10 +56,10 @@
 - Produces: `StructureAnalyzerBackend` ABC with `analyze(audio_path, stems=None, device="auto") -> MusicalTimeline`
 - Produces: `LibrosaStructureAnalyzer(StructureAnalyzerBackend)`
 
-- [ ] **Step 1: Write failing test in `tests/test_librosa_structure.py` for beat, downbeat, and section extraction**
-- [ ] **Step 2: Run `uv run pytest tests/test_librosa_structure.py` and verify FAIL**
-- [ ] **Step 3: Implement `structure_base.py` and `librosa_structure_backend.py` using spectral novelty and recurrence segmentation**
-- [ ] **Step 4: Run `uv run pytest tests/test_librosa_structure.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_librosa_structure.py` for beat, downbeat, and section extraction**
+- [x] **Step 2: Run `uv run pytest tests/test_librosa_structure.py` and verify FAIL**
+- [x] **Step 3: Implement `structure_base.py` and `librosa_structure_backend.py` using spectral novelty and recurrence segmentation**
+- [x] **Step 4: Run `uv run pytest tests/test_librosa_structure.py` and verify PASS**
 
 ---
 
@@ -74,10 +74,10 @@
 - Produces: `AllInOneStructureAnalyzer(StructureAnalyzerBackend)`
 - Produces: `get_structure_analyzer(name="auto", device="auto") -> StructureAnalyzerBackend`
 
-- [ ] **Step 1: Write failing test in `tests/test_structure_registry.py` testing registry lookup and fallback behavior**
-- [ ] **Step 2: Run `uv run pytest tests/test_structure_registry.py` and verify FAIL**
-- [ ] **Step 3: Implement `allin1_backend.py` (with stem directory reuse) and register in `backends/__init__.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_structure_registry.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_structure_registry.py` testing registry lookup and fallback behavior**
+- [x] **Step 2: Run `uv run pytest tests/test_structure_registry.py` and verify FAIL**
+- [x] **Step 3: Implement `allin1_backend.py` (with stem directory reuse) and register in `backends/__init__.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_structure_registry.py` and verify PASS**
 
 ---
 
@@ -92,10 +92,10 @@
 - Produces: `WorkspaceManager.save_timeline(file_path, timeline)` and `load_timeline(file_path)`
 - Produces: CLI `music-re structure <file>` and updated `music-re deconstruct`
 
-- [ ] **Step 1: Write failing test in `tests/test_structure_cli.py` testing timeline save/load and CLI structure command**
-- [ ] **Step 2: Run `uv run pytest tests/test_structure_cli.py` and verify FAIL**
-- [ ] **Step 3: Implement timeline methods in `workspace.py`, wire CLI command `structure` and integrate into `cmd_deconstruct`**
-- [ ] **Step 4: Run `uv run pytest tests/test_structure_cli.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_structure_cli.py` testing timeline save/load and CLI structure command**
+- [x] **Step 2: Run `uv run pytest tests/test_structure_cli.py` and verify FAIL**
+- [x] **Step 3: Implement timeline methods in `workspace.py`, wire CLI command `structure` and integrate into `cmd_deconstruct`**
+- [x] **Step 4: Run `uv run pytest tests/test_structure_cli.py` and verify PASS**
 
 ---
 
@@ -108,6 +108,6 @@
 - Consumes: Complete Stage 3 pipeline
 - Produces: Verification of full timeline generation on reference audio without re-running separation
 
-- [ ] **Step 1: Write comprehensive e2e test in `tests/test_structure_e2e.py` verifying `timeline.json` structure, beats coherence, and stem reuse**
-- [ ] **Step 2: Run `uv run pytest tests/test_structure_e2e.py` and verify PASS**
-- [ ] **Step 3: Run full pytest suite across all tests (62+ tests) and verify 100% green**
+- [x] **Step 1: Write comprehensive e2e test in `tests/test_structure_e2e.py` verifying `timeline.json` structure, beats coherence, and stem reuse**
+- [x] **Step 2: Run `uv run pytest tests/test_structure_e2e.py` and verify PASS**
+- [x] **Step 3: Run full pytest suite across all tests (62+ tests) and verify 100% green**
