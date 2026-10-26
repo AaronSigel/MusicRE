@@ -87,44 +87,54 @@ class DemucsSeparator(SeparatorBackend):
             channels=2,
         )
 
-        # Handle silent audio
-        if wav_raw.abs().max() < 1e-5:
+        try:
+            # Handle silent audio
+            if wav_raw.abs().max() < 1e-5:
+                if progress_callback:
+                    progress_callback("Audio is silent; generating zero-signal stems.")
+                zero_sig = torch.zeros((2, 44100), dtype=torch.float32)
+                results = {}
+                for name in self.supported_stems:
+                    target_path = out_d / f"{name}.wav"
+                    tmp_path = out_d / f"{name}_tmp.wav"
+                    save_audio(zero_sig, str(tmp_path), samplerate=44100)
+                    tmp_path.replace(target_path)
+                    results[name] = target_path
+                completion_marker.write_text("ok")
+                return results
+
             if progress_callback:
-                progress_callback("Audio is silent; generating zero-signal stems.")
-            zero_sig = torch.zeros((2, 44100), dtype=torch.float32)
+                progress_callback(f"Running Demucs ({self.model_name}) on device '{self.device}'...")
+
+            self.load()
+            assert self._model is not None
+
+            ref = wav_raw.mean(0)
+            std = ref.std()
+            if std < 1e-8:
+                std = torch.tensor(1.0)
+            wav = (wav_raw - ref.mean()) / std
+
+            with torch.no_grad():
+                sources = apply_model(self._model, wav[None].to(self.device))[0]
+                sources = sources * std.to(self.device) + ref.mean().to(self.device)
+
             results = {}
-            for name in self.supported_stems:
+            for name, source in zip(self._model.sources, sources):
                 target_path = out_d / f"{name}.wav"
                 tmp_path = out_d / f"{name}_tmp.wav"
-                save_audio(zero_sig, str(tmp_path), samplerate=44100)
+                save_audio(source.cpu(), str(tmp_path), samplerate=self._model.samplerate)
                 tmp_path.replace(target_path)
                 results[name] = target_path
+
             completion_marker.write_text("ok")
             return results
-
-        if progress_callback:
-            progress_callback(f"Running Demucs ({self.model_name}) on device '{self.device}'...")
-
-        self.load()
-        assert self._model is not None
-
-        ref = wav_raw.mean(0)
-        std = ref.std()
-        if std < 1e-8:
-            std = torch.tensor(1.0)
-        wav = (wav_raw - ref.mean()) / std
-
-        with torch.no_grad():
-            sources = apply_model(self._model, wav[None].to(self.device))[0]
-            sources = sources * std.to(self.device) + ref.mean().to(self.device)
-
-        results = {}
-        for name, source in zip(self._model.sources, sources):
-            target_path = out_d / f"{name}.wav"
-            tmp_path = out_d / f"{name}_tmp.wav"
-            save_audio(source.cpu(), str(tmp_path), samplerate=self._model.samplerate)
-            tmp_path.replace(target_path)
-            results[name] = target_path
-
-        completion_marker.write_text("ok")
-        return results
+        except Exception:
+            if completion_marker.exists():
+                completion_marker.unlink()
+            for tmp_file in out_d.glob("*_tmp.wav"):
+                try:
+                    tmp_file.unlink()
+                except OSError:
+                    pass
+            raise

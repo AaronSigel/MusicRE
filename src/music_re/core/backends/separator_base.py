@@ -6,10 +6,13 @@ import torch
 
 def resolve_device(requested_device: str = "auto") -> str:
     """Resolve device string: 'auto' selects cuda if available, else cpu."""
-    if requested_device == "auto":
+    req = requested_device.lower()
+    if req == "auto":
         if torch.cuda.is_available():
             return "cuda"
         return "cpu"
+    if req.startswith("cuda") and not torch.cuda.is_available():
+        raise ValueError(f"CUDA device requested ('{requested_device}') but CUDA is not available")
     return requested_device
 
 

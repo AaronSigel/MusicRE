@@ -26,9 +26,15 @@ def separate_stems(
         workspace = WorkspaceManager()
 
     track_dir = workspace.get_track_dir(p)
-    model_name = "htdemucs_6s" if six_stems else "htdemucs"
+    backend = get_separator_backend(
+        name=backend_name,
+        six_stems=six_stems,
+        device=device,
+    )
+    model_name = backend.model_name
+    expected_stems = backend.supported_stems
+    quality_note = getattr(backend, "quality_note", None)
     stems_dir = workspace.get_stems_dir(p, model_name=model_name)
-    expected_stems = STEMS_6 if six_stems else STEMS_4
 
     # 1. Check cache: segregated model directory first, fallback to legacy stems_dir
     candidate_dirs = [stems_dir, track_dir / "stems"]
@@ -52,14 +58,10 @@ def separate_stems(
                     workspace_dir=str(track_dir),
                     model_used=model_name,
                     stems=cached_stems,
+                    quality_note=quality_note,
                 )
 
     # 2. Run backend separation
-    backend = get_separator_backend(
-        name=backend_name,
-        six_stems=six_stems,
-        device=device,
-    )
     stems_res = backend.separate(
         input_audio=p,
         output_dir=stems_dir,
@@ -71,4 +73,5 @@ def separate_stems(
         workspace_dir=str(track_dir),
         model_used=backend.model_name,
         stems=stems_dict,
+        quality_note=quality_note,
     )

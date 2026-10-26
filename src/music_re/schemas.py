@@ -28,6 +28,7 @@ class StemSeparationResult(BaseModel):
     workspace_dir: str
     model_used: str
     stems: Dict[str, str] = Field(description="Mapping of stem_name to absolute wav path")
+    quality_note: Optional[str] = Field(default=None, description="Quality or bleed notice for model/mode")
 
 
 class NoteEvent(BaseModel):
