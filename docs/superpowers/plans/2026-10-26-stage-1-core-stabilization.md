@@ -38,11 +38,11 @@
 - Produces: `decode_audio(input_path: Path | str, target_sr: int | None = None, normalize_db: float | None = -1.0) -> Tuple[np.ndarray, int]`
 - Produces: `decode_to_temp_wav(input_path: Path | str, target_sr: int | None = None) -> Generator[Path, None, None]`
 
-- [ ] **Step 1: Write failing test for `decode_audio` and `decode_to_temp_wav` in `tests/test_audio_io.py`**
-- [ ] **Step 2: Run `uv run pytest tests/test_audio_io.py` and verify FAIL**
-- [ ] **Step 3: Implement `audio_io.py` using `ffmpeg -i ... -c:a pcm_f32le ...` and `soundfile`**
-- [ ] **Step 4: Update `src/music_re/core/analyzer.py` to use `audio_io.decode_audio` instead of direct `librosa.load(audioread)`**
-- [ ] **Step 5: Run `uv run pytest tests/test_audio_io.py tests/test_analyzer.py` and verify PASS without audioread deprecation warnings**
+- [x] **Step 1: Write failing test for `decode_audio` and `decode_to_temp_wav` in `tests/test_audio_io.py`**
+- [x] **Step 2: Run `uv run pytest tests/test_audio_io.py` and verify FAIL**
+- [x] **Step 3: Implement `audio_io.py` using `ffmpeg -i ... -c:a pcm_f32le ...` and `soundfile`**
+- [x] **Step 4: Update `src/music_re/core/analyzer.py` to use `audio_io.decode_audio` instead of direct `librosa.load(audioread)`**
+- [x] **Step 5: Run `uv run pytest tests/test_audio_io.py tests/test_analyzer.py` and verify PASS without audioread deprecation warnings**
 
 ---
 
@@ -58,10 +58,10 @@
 - Produces: `compute_file_content_hash(path: Path | str) -> str`
 - Produces: Segregated cache paths: `<cache_dir>/<model_name>/<content_hash>/`
 
-- [ ] **Step 1: Write failing test in `tests/test_workspace_cache.py` verifying 4-stem and 6-stem separation cache separation and content hashing**
-- [ ] **Step 2: Run `uv run pytest tests/test_workspace_cache.py` and verify FAIL**
-- [ ] **Step 3: Implement SHA-256 content hashing in `workspace.py` and model-specific subdirectories in `separator.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_workspace_cache.py tests/test_separator.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_workspace_cache.py` verifying 4-stem and 6-stem separation cache separation and content hashing**
+- [x] **Step 2: Run `uv run pytest tests/test_workspace_cache.py` and verify FAIL**
+- [x] **Step 3: Implement SHA-256 content hashing in `workspace.py` and model-specific subdirectories in `separator.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_workspace_cache.py tests/test_separator.py` and verify PASS**
 
 ---
 
@@ -77,10 +77,10 @@
 - Produces: Full duration beats array in `AudioAnalysisResult`
 - Produces: Key estimation that ignores drum stems
 
-- [ ] **Step 1: Write failing test in `tests/test_analyzer_unlimited.py` for >64 beats and drum key skipping**
-- [ ] **Step 2: Run `uv run pytest tests/test_analyzer_unlimited.py` and verify FAIL**
-- [ ] **Step 3: Remove `[:64]` slice limits from `analyzer.py` and `slicer.py`; guard key detection against 'drums' stem**
-- [ ] **Step 4: Run `uv run pytest tests/test_analyzer_unlimited.py tests/test_analyzer.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_analyzer_unlimited.py` for >64 beats and drum key skipping**
+- [x] **Step 2: Run `uv run pytest tests/test_analyzer_unlimited.py` and verify FAIL**
+- [x] **Step 3: Remove `[:64]` slice limits from `analyzer.py` and `slicer.py`; guard key detection against 'drums' stem**
+- [x] **Step 4: Run `uv run pytest tests/test_analyzer_unlimited.py tests/test_analyzer.py` and verify PASS**
 
 ---
 
@@ -95,10 +95,10 @@
 - Produces: `clean_and_quantize_midi(input_midi, output_midi, ...)` with overlap resolution
 - Produces: Both `stem_raw.mid` and `stem_quantized.mid` (and default `stem.mid`)
 
-- [ ] **Step 1: Write failing test in `tests/test_midi_cleaning.py` with overlapping identical pitch notes and dual MIDI output check**
-- [ ] **Step 2: Run `uv run pytest tests/test_midi_cleaning.py` and verify FAIL**
-- [ ] **Step 3: Enhance `clean_and_quantize_midi` to truncate overlapping same-pitch notes and emit both raw and quantized MIDI files**
-- [ ] **Step 4: Run `uv run pytest tests/test_midi_cleaning.py tests/test_midi_tonal.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_midi_cleaning.py` with overlapping identical pitch notes and dual MIDI output check**
+- [x] **Step 2: Run `uv run pytest tests/test_midi_cleaning.py` and verify FAIL**
+- [x] **Step 3: Enhance `clean_and_quantize_midi` to truncate overlapping same-pitch notes and emit both raw and quantized MIDI files**
+- [x] **Step 4: Run `uv run pytest tests/test_midi_cleaning.py tests/test_midi_tonal.py` and verify PASS**
 
 ---
 
@@ -114,10 +114,10 @@
 - Produces: `WorkspaceManifest` with `status`, `stage`, `stage_errors`
 - Produces: Safe resume mechanism in CLI and workspace
 
-- [ ] **Step 1: Write failing test in `tests/test_pipeline_resumption.py` for error recording and resuming skipped completed stages**
-- [ ] **Step 2: Run `uv run pytest tests/test_pipeline_resumption.py` and verify FAIL**
-- [ ] **Step 3: Update `schemas.py`, `workspace.py`, and `cli.py` to record stage transitions, catch errors into manifest, and skip completed stages**
-- [ ] **Step 4: Run `uv run pytest tests/test_pipeline_resumption.py tests/test_cli.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_pipeline_resumption.py` for error recording and resuming skipped completed stages**
+- [x] **Step 2: Run `uv run pytest tests/test_pipeline_resumption.py` and verify FAIL**
+- [x] **Step 3: Update `schemas.py`, `workspace.py`, and `cli.py` to record stage transitions, catch errors into manifest, and skip completed stages**
+- [x] **Step 4: Run `uv run pytest tests/test_pipeline_resumption.py tests/test_cli.py` and verify PASS**
 
 ---
 
@@ -130,6 +130,6 @@
 - Consumes: Entire stabilized pipeline
 - Produces: Verification of full workflow on MP3, WAV, and FLAC inputs
 
-- [ ] **Step 1: Write end-to-end test in `tests/test_stage1_e2e.py` covering multi-format decode, cache isolation, unlimited beats, dual MIDI, and manifest status**
-- [ ] **Step 2: Run `uv run pytest tests/test_stage1_e2e.py` and verify PASS**
-- [ ] **Step 3: Run full pytest suite across all tests and verify 100% green without deprecation warnings**
+- [x] **Step 1: Write end-to-end test in `tests/test_stage1_e2e.py` covering multi-format decode, cache isolation, unlimited beats, dual MIDI, and manifest status**
+- [x] **Step 2: Run `uv run pytest tests/test_stage1_e2e.py` and verify PASS**
+- [x] **Step 3: Run full pytest suite across all tests and verify 100% green without deprecation warnings**
