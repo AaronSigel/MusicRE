@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from music_re.core.analyzer import analyze_audio
+from music_re.core.backends import get_structure_analyzer
 from music_re.core.midi_digest import generate_midi_digest
 from music_re.core.midi_drums import transcribe_drums
 from music_re.core.midi_tonal import transcribe_tonal
@@ -55,6 +56,51 @@ def cmd_analyze(
     table.add_row("Beat Count", str(len(analysis.beat_times)))
 
     console.print(table)
+
+
+@app.command("structure")
+def cmd_structure(
+    file: Path = typer.Argument(..., help="Path to input audio file"),
+    backend: str = typer.Option("auto", "--backend", "-b", help="Structure backend: 'auto', 'allin1', 'librosa'"),
+    device: str = typer.Option("auto", "--device", "-d", help="Computation device: 'auto', 'cpu', 'cuda'"),
+    as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Analyze musical structure: BPM, beats, downbeats, and sections (timeline.json)."""
+    ws = WorkspaceManager()
+    manifest = ws.get_manifest(file)
+    analyzer = get_structure_analyzer(name=backend)
+    console.print(f"[cyan]Analyzing structure for {file.name} using '{analyzer.backend_name}'...[/cyan]")
+    timeline = analyzer.analyze(file, stems=manifest.stems, device=device)
+    ws.save_timeline(file, timeline)
+
+    if as_json:
+        console.print(timeline.model_dump_json(indent=2))
+        return
+
+    table = Table(title=f"Structure Analysis: {file.name} ({analyzer.backend_name})")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="magenta")
+    table.add_row("Duration", f"{timeline.duration_sec:.2f} s")
+    table.add_row("BPM", f"{timeline.bpm:.2f}")
+    table.add_row("Total Beats", str(len(timeline.beats)))
+    table.add_row("Downbeats (Bars)", str(len(timeline.downbeats)))
+    table.add_row("Sections Count", str(len(timeline.sections)))
+    console.print(table)
+
+    if timeline.sections:
+        sec_table = Table(title="Musical Sections")
+        sec_table.add_column("Label", style="green")
+        sec_table.add_column("Start", justify="right")
+        sec_table.add_column("End", justify="right")
+        sec_table.add_column("Duration", justify="right")
+        for s in timeline.sections:
+            sec_table.add_row(
+                s.label,
+                f"{s.start_sec:.2f}s",
+                f"{s.end_sec:.2f}s",
+                f"{s.end_sec - s.start_sec:.2f}s",
+            )
+        console.print(sec_table)
 
 
 @app.command("split")
@@ -217,7 +263,27 @@ def cmd_deconstruct(
             console.print(f"[red]Analysis stage failed:[/red] {e}")
             raise typer.Exit(code=1)
 
-    # 3. Transcribe stems to MIDI
+    # 3. Musical Structure Analysis (timeline.json)
+    if "structure" in manifest.completed_stages and manifest.timeline:
+        console.print("[green]Reusing musical structure (timeline.json) from workspace.[/green]")
+    else:
+        try:
+            ws.update_manifest(file, current_stage="structure")
+            structure_analyzer = get_structure_analyzer(name="auto")
+            timeline = structure_analyzer.analyze(file, stems=stems_dict, device=device)
+            ws.save_timeline(file, timeline)
+            console.print(
+                f"[green]Structure analyzed:[/green] {len(timeline.sections)} sections, "
+                f"{len(timeline.beats)} beats, {len(timeline.downbeats)} bars"
+            )
+            if timeline.bpm > 0:
+                bpm = timeline.bpm
+        except Exception as e:
+            ws.record_stage_error(file, "structure", str(e))
+            console.print(f"[red]Structure analysis stage failed:[/red] {e}")
+            raise typer.Exit(code=1)
+
+    # 4. Transcribe stems to MIDI
     midis_dir = track_dir / "midis"
     midis_dir.mkdir(parents=True, exist_ok=True)
     midi_outputs = dict(manifest.midis)

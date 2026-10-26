@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from music_re.schemas import WorkspaceManifest
+from music_re.schemas import MusicalTimeline, WorkspaceManifest
 
 
 def compute_file_content_hash(path: Union[str, Path], chunk_size: int = 64 * 1024) -> str:
@@ -72,6 +72,26 @@ class WorkspaceManager:
         tmp_file.replace(meta_file)
         return meta_file
 
+    def get_timeline_path(self, file_path: Union[str, Path]) -> Path:
+        return self.get_track_dir(file_path) / "timeline.json"
+
+    def save_timeline(self, file_path: Union[str, Path], timeline: MusicalTimeline) -> Path:
+        tl_path = self.get_timeline_path(file_path)
+        tmp_file = tl_path.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(timeline.model_dump(), f, indent=2, ensure_ascii=False)
+        tmp_file.replace(tl_path)
+        self.mark_stage_complete(file_path, "structure", artifacts={"timeline": timeline.model_dump()})
+        return tl_path
+
+    def load_timeline(self, file_path: Union[str, Path]) -> Optional[MusicalTimeline]:
+        tl_path = self.get_timeline_path(file_path)
+        if not tl_path.exists():
+            return None
+        with open(tl_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return MusicalTimeline(**data)
+
     def load_metadata(self, file_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         meta_file = self.get_track_dir(file_path) / "metadata.json"
         if not meta_file.exists():
@@ -129,6 +149,8 @@ class WorkspaceManager:
                 manifest.stems.update(artifacts)
             elif stage == "analysis":
                 manifest.analysis = artifacts
+            elif stage == "structure":
+                manifest.timeline = artifacts.get("timeline", artifacts)
             elif stage == "transcription":
                 manifest.midis.update(artifacts)
         if stage in manifest.stage_errors:
