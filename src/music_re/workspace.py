@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from music_re.schemas import MusicalTimeline, WorkspaceManifest
+from music_re.schemas import MusicalTimeline, QualityReport, WorkspaceManifest
 
 
 def compute_file_content_hash(path: Union[str, Path], chunk_size: int = 64 * 1024) -> str:
@@ -92,6 +92,26 @@ class WorkspaceManager:
             data = json.load(f)
         return MusicalTimeline(**data)
 
+    def get_quality_report_path(self, file_path: Union[str, Path]) -> Path:
+        return self.get_track_dir(file_path) / "quality_report.json"
+
+    def save_quality_report(self, file_path: Union[str, Path], report: QualityReport) -> Path:
+        qr_path = self.get_quality_report_path(file_path)
+        tmp_file = qr_path.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(report.model_dump(), f, indent=2, ensure_ascii=False)
+        tmp_file.replace(qr_path)
+        self.mark_stage_complete(file_path, "evaluation", artifacts={"report": report.model_dump()})
+        return qr_path
+
+    def load_quality_report(self, file_path: Union[str, Path]) -> Optional[QualityReport]:
+        qr_path = self.get_quality_report_path(file_path)
+        if not qr_path.exists():
+            return None
+        with open(qr_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return QualityReport(**data)
+
     def load_metadata(self, file_path: Union[str, Path]) -> Optional[Dict[str, Any]]:
         meta_file = self.get_track_dir(file_path) / "metadata.json"
         if not meta_file.exists():
@@ -151,6 +171,8 @@ class WorkspaceManager:
                 manifest.analysis = artifacts
             elif stage == "structure":
                 manifest.timeline = artifacts.get("timeline", artifacts)
+            elif stage == "evaluation":
+                manifest.evaluation = artifacts
             elif stage == "transcription":
                 manifest.midis.update(artifacts)
         if stage in manifest.stage_errors:

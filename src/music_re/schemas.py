@@ -12,7 +12,16 @@ class WorkspaceManifest(BaseModel):
     stems: Dict[str, str] = Field(default_factory=dict)
     analysis: Optional[Dict[str, Any]] = None
     timeline: Optional[Dict[str, Any]] = None
+    evaluation: Optional[Dict[str, Any]] = None
     midis: Dict[str, str] = Field(default_factory=dict)
+
+
+class QualityReport(BaseModel):
+    is_objective: bool = Field(description="True if calculated against ground truth, False if diagnostic")
+    separation_metrics: Dict[str, Any] = Field(default_factory=dict)
+    transcription_metrics: Dict[str, Any] = Field(default_factory=dict)
+    audio_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    evaluated_at: str = Field(description="ISO timestamp")
 
 
 class TimelineSection(BaseModel):
