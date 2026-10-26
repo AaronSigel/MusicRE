@@ -34,6 +34,8 @@ class BasicPitchTranscriber(TranscriberBackend):
             raise FileNotFoundError(f"Audio file not found: {in_p}")
 
         effective_bpm = timeline.bpm if timeline and timeline.bpm > 0 else bpm
+        if effective_bpm <= 0:
+            effective_bpm = 120.0
 
         from basic_pitch.inference import predict_and_save
         from basic_pitch import ICASSP_2022_MODEL_PATH

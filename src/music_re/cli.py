@@ -6,12 +6,14 @@ from rich.console import Console
 from rich.table import Table
 
 from music_re.core.analyzer import analyze_audio
-from music_re.core.backends import get_structure_analyzer
+from music_re.core.backends import get_structure_analyzer, get_transcriber_backend
 from music_re.core.midi_digest import generate_midi_digest
 from music_re.core.midi_drums import transcribe_drums
+from music_re.core.midi_project import build_combined_midi_project
 from music_re.core.midi_tonal import transcribe_tonal
 from music_re.core.separator import separate_stems
 from music_re.core.slicer import slice_audio
+from music_re.schemas import MusicalTimeline
 from music_re.workspace import WorkspaceManager
 
 app = typer.Typer(help="music-re: Audio Reverse Engineering CLI")
@@ -135,16 +137,31 @@ def cmd_to_midi(
     stem_file: Path = typer.Argument(..., help="Path to audio stem file"),
     mode: str = typer.Option("tonal", "--mode", "-m", help="Transcription mode: 'tonal' or 'drums'"),
     bpm: float = typer.Option(120.0, "--bpm", "-b", help="Tempo in BPM"),
+    timeline: Optional[Path] = typer.Option(None, "--timeline", "-t", help="Path to timeline.json for dynamic snapping"),
+    raw: bool = typer.Option(True, "--raw/--no-raw", help="Save unquantized raw copy"),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Output MIDI path"),
 ):
     """Transcribe audio stem to MIDI."""
     if out is None:
         out = stem_file.with_suffix(".mid")
 
-    if mode == "drums":
-        res = transcribe_drums(stem_file, out, bpm=bpm)
-    else:
-        res = transcribe_tonal(stem_file, out, bpm=bpm)
+    tl_obj = None
+    if timeline and timeline.is_file():
+        try:
+            with open(timeline, "r", encoding="utf-8") as f:
+                tl_obj = MusicalTimeline(**json.load(f))
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not parse timeline file {timeline}: {e}[/yellow]")
+
+    transcriber = get_transcriber_backend(mode=mode)
+    res = transcriber.transcribe(
+        audio_path=stem_file,
+        output_midi_path=out,
+        timeline=tl_obj,
+        bpm=bpm,
+        quantize=True,
+        save_raw=raw,
+    )
 
     console.print(f"[green]Saved {mode} MIDI to:[/green] {res}")
 
@@ -266,6 +283,7 @@ def cmd_deconstruct(
     # 3. Musical Structure Analysis (timeline.json)
     if "structure" in manifest.completed_stages and manifest.timeline:
         console.print("[green]Reusing musical structure (timeline.json) from workspace.[/green]")
+        timeline = ws.load_timeline(file)
     else:
         try:
             ws.update_manifest(file, current_stage="structure")
@@ -278,6 +296,8 @@ def cmd_deconstruct(
             )
             if timeline.bpm > 0:
                 bpm = timeline.bpm
+            if bpm <= 0:
+                bpm = 120.0
         except Exception as e:
             ws.record_stage_error(file, "structure", str(e))
             console.print(f"[red]Structure analysis stage failed:[/red] {e}")
@@ -294,11 +314,27 @@ def cmd_deconstruct(
             if stem_name in midi_outputs and Path(midi_outputs[stem_name]).is_file():
                 continue
             out_mid = midis_dir / f"{stem_name}.mid"
-            if stem_name == "drums":
-                transcribe_drums(stem_path, out_mid, bpm=bpm)
-            else:
-                transcribe_tonal(stem_path, out_mid, bpm=bpm)
+            mode = "drums" if stem_name == "drums" else "tonal"
+            transcriber = get_transcriber_backend(mode=mode)
+            transcriber.transcribe(
+                audio_path=stem_path,
+                output_midi_path=out_mid,
+                timeline=timeline,
+                bpm=bpm,
+                quantize=True,
+                save_raw=True,
+            )
             midi_outputs[stem_name] = str(out_mid)
+
+        # Assemble unified multi-track Standard MIDI project (all_stems.mid)
+        all_stems_path = midis_dir / "all_stems.mid"
+        build_combined_midi_project(
+            stem_midis={k: v for k, v in midi_outputs.items() if k != "all_stems"},
+            output_path=all_stems_path,
+            timeline=timeline,
+            bpm=bpm,
+        )
+        midi_outputs["all_stems"] = str(all_stems_path)
 
         ws.mark_stage_complete(file, "transcription", artifacts=midi_outputs)
         ws.update_manifest(file, status="completed", current_stage="completed")

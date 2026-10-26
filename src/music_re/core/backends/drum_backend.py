@@ -32,6 +32,8 @@ class DrumTranscriber(TranscriberBackend):
             raise FileNotFoundError(f"Drum audio file not found: {in_p}")
 
         effective_bpm = timeline.bpm if timeline and timeline.bpm > 0 else bpm
+        if effective_bpm <= 0:
+            effective_bpm = 120.0
 
         pm = pretty_midi.PrettyMIDI(initial_tempo=effective_bpm)
         drum_inst = pretty_midi.Instrument(program=0, is_drum=True, name="Drums")
