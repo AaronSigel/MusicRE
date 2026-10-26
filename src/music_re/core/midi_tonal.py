@@ -1,9 +1,10 @@
 import contextlib
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
-from typing import Union
+from typing import Dict, List, Union
 import pretty_midi
 
 
@@ -14,7 +15,7 @@ def clean_and_quantize_midi(
     min_duration: float = 0.05,
     quantize_grid: float = 0.25,  # 0.25 = 16th note in 4/4
 ) -> Path:
-    """Filter out noise artifacts, merge overlapping notes, and quantize onsets."""
+    """Filter out noise artifacts, deduplicate/truncate overlapping same-pitch notes, and quantize onsets."""
     in_p = Path(input_midi_path).resolve()
     out_p = Path(output_midi_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
@@ -26,38 +27,62 @@ def clean_and_quantize_midi(
         if instrument.is_drum:
             continue
 
-        # Sort notes by start time, then pitch
-        notes = sorted(instrument.notes, key=lambda n: (n.start, n.pitch))
-        cleaned_notes = []
-
-        for note in notes:
-            # 1. Filter out micro-noise
+        # 1. Filter out micro-noise and quantize onsets
+        valid_notes: List[pretty_midi.Note] = []
+        for note in instrument.notes:
             duration = note.end - note.start
             if duration < min_duration:
                 continue
 
-            # 2. Quantize start time
             snapped_start = round(note.start / grid_sec) * grid_sec
             snapped_end = max(snapped_start + min_duration, note.end)
 
-            new_note = pretty_midi.Note(
-                velocity=note.velocity,
-                pitch=note.pitch,
-                start=snapped_start,
-                end=snapped_end,
+            valid_notes.append(
+                pretty_midi.Note(
+                    velocity=note.velocity,
+                    pitch=note.pitch,
+                    start=snapped_start,
+                    end=snapped_end,
+                )
             )
 
-            # 3. Merge overlapping duplicate pitches
-            if cleaned_notes and cleaned_notes[-1].pitch == new_note.pitch:
-                prev_note = cleaned_notes[-1]
-                if new_note.start <= prev_note.end:
-                    # Extend previous note
-                    prev_note.end = max(prev_note.end, new_note.end)
-                    prev_note.velocity = max(prev_note.velocity, new_note.velocity)
+        # 2. Group notes by pitch to eliminate polyphonic same-pitch overlaps/conflicts
+        pitch_groups: Dict[int, List[pretty_midi.Note]] = {}
+        for n in valid_notes:
+            pitch_groups.setdefault(n.pitch, []).append(n)
+
+        cleaned_notes: List[pretty_midi.Note] = []
+        for pitch, p_notes in pitch_groups.items():
+            # Sort by start time, then end time
+            p_notes.sort(key=lambda x: (x.start, x.end))
+            resolved: List[pretty_midi.Note] = []
+
+            for n in p_notes:
+                if not resolved:
+                    resolved.append(n)
                     continue
 
-            cleaned_notes.append(new_note)
+                prev = resolved[-1]
+                if n.start < prev.end:
+                    # Duplicate onset or micro-gap -> merge
+                    if abs(n.start - prev.start) < min_duration:
+                        prev.end = max(prev.end, n.end)
+                        prev.velocity = max(prev.velocity, n.velocity)
+                    else:
+                        # Truncate previous note before next onset
+                        prev.end = n.start
+                        if prev.end > prev.start:
+                            resolved.append(n)
+                        else:
+                            # Previous note was completely consumed, replace it
+                            resolved[-1] = n
+                else:
+                    resolved.append(n)
 
+            cleaned_notes.extend(resolved)
+
+        # 3. Sort all notes chronologically
+        cleaned_notes.sort(key=lambda n: (n.start, n.pitch))
         instrument.notes = cleaned_notes
 
     pm.write(str(out_p))
@@ -68,8 +93,9 @@ def transcribe_tonal(
     audio_path: Union[str, Path],
     output_midi_path: Union[str, Path],
     bpm: float = 120.0,
+    save_raw_copy: bool = True,
 ) -> Path:
-    """Transcribe melodic audio stem to MIDI using Basic Pitch and clean result."""
+    """Transcribe melodic audio stem to MIDI using Basic Pitch, save raw unquantized copy, and clean result."""
     in_p = Path(audio_path).resolve()
     out_p = Path(output_midi_path).resolve()
     if not in_p.is_file():
@@ -79,6 +105,9 @@ def transcribe_tonal(
 
     from basic_pitch.inference import predict_and_save
     from basic_pitch import ICASSP_2022_MODEL_PATH
+
+    onnx_path = Path(str(ICASSP_2022_MODEL_PATH) + ".onnx")
+    model_to_use = str(onnx_path) if onnx_path.exists() else ICASSP_2022_MODEL_PATH
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
@@ -92,7 +121,7 @@ def transcribe_tonal(
                 sonify_midi=False,
                 save_model_outputs=False,
                 save_notes=False,
-                model_or_model_path=ICASSP_2022_MODEL_PATH,
+                model_or_model_path=model_to_use,
                 midi_tempo=bpm,
             )
 
@@ -102,9 +131,17 @@ def transcribe_tonal(
             pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
             pm.instruments.append(pretty_midi.Instrument(program=0))
             pm.write(str(out_p))
+            if save_raw_copy:
+                raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
+                pm.write(str(raw_out_p))
             return out_p
 
         raw_midi = generated_midis[0]
+
+        if save_raw_copy:
+            raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
+            shutil.copy2(str(raw_midi), str(raw_out_p))
+
         clean_and_quantize_midi(raw_midi, out_p, bpm=bpm)
 
     return out_p
