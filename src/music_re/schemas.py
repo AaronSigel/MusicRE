@@ -11,7 +11,23 @@ class WorkspaceManifest(BaseModel):
     stage_errors: Dict[str, str] = Field(default_factory=dict)
     stems: Dict[str, str] = Field(default_factory=dict)
     analysis: Optional[Dict[str, Any]] = None
+    timeline: Optional[Dict[str, Any]] = None
     midis: Dict[str, str] = Field(default_factory=dict)
+
+
+class TimelineSection(BaseModel):
+    label: str = Field(description="Section label, e.g. 'intro', 'verse', 'chorus', 'bridge', 'outro'")
+    start_sec: float = Field(description="Start time in seconds")
+    end_sec: float = Field(description="End time in seconds")
+    confidence: float = Field(default=1.0, description="Detection confidence 0.0 - 1.0")
+
+
+class MusicalTimeline(BaseModel):
+    duration_sec: float
+    bpm: float
+    beats: List[float] = Field(description="Beat timestamps in seconds")
+    downbeats: List[float] = Field(description="Downbeat / bar start timestamps in seconds")
+    sections: List[TimelineSection] = Field(default_factory=list)
 
 
 class TrackAnalysis(BaseModel):
