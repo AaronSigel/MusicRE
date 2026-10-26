@@ -79,14 +79,30 @@ def quantize_to_timeline(
         max_duration=max_t,
     )
 
+    limit_duration = timeline.duration_sec if timeline and timeline.duration_sec > 0 else 0.0
+
     for inst in pm.instruments:
         valid_notes: List[pretty_midi.Note] = []
         for n in inst.notes:
             if n.end - n.start < min_duration:
                 continue
 
+            # Discard notes that start beyond track boundary
+            if limit_duration > 0 and n.start >= limit_duration:
+                continue
+
             snapped_start = snap_to_nearest_grid(n.start, grid)
-            snapped_end = max(snapped_start + min_duration, n.end)
+            if limit_duration > 0 and snapped_start + min_duration > limit_duration:
+                snapped_start = max(0.0, limit_duration - min_duration)
+                snapped_end = limit_duration
+            else:
+                snapped_end = max(snapped_start + min_duration, n.end)
+                if limit_duration > 0 and snapped_end > limit_duration:
+                    snapped_end = limit_duration
+
+            if snapped_end <= snapped_start:
+                continue
+
             valid_notes.append(
                 pretty_midi.Note(
                     velocity=n.velocity,

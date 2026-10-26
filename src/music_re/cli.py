@@ -139,6 +139,7 @@ def cmd_to_midi(
     bpm: float = typer.Option(120.0, "--bpm", "-b", help="Tempo in BPM"),
     timeline: Optional[Path] = typer.Option(None, "--timeline", "-t", help="Path to timeline.json for dynamic snapping"),
     raw: bool = typer.Option(True, "--raw/--no-raw", help="Save unquantized raw copy"),
+    grid: int = typer.Option(4, "--grid", "-g", help="Subdivisions per beat (e.g. 4 for 16th notes)"),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Output MIDI path"),
 ):
     """Transcribe audio stem to MIDI."""

@@ -54,3 +54,25 @@ def test_quantize_eliminates_polyphonic_overlaps():
     p60_notes = [n for n in quantized.instruments[0].notes if n.pitch == 60]
     for i in range(len(p60_notes) - 1):
         assert p60_notes[i].end <= p60_notes[i + 1].start
+
+def test_quantize_caps_at_timeline_duration():
+    tl = MusicalTimeline(
+        duration_sec=2.0,
+        bpm=120.0,
+        beats=[0.0, 0.5, 1.0, 1.5],
+        downbeats=[0.0],
+        sections=[],
+    )
+    pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
+    inst = pretty_midi.Instrument(program=0)
+    # Note starts right before track end: 1.96s -> 2.05s
+    inst.notes.append(pretty_midi.Note(velocity=100, pitch=60, start=1.96, end=2.05))
+    # Note starts after track end
+    inst.notes.append(pretty_midi.Note(velocity=100, pitch=62, start=2.1, end=2.3))
+    pm.instruments.append(inst)
+
+    quantized = quantize_to_timeline(pm, timeline=tl, grid_subdivisions=4)
+    notes = quantized.instruments[0].notes
+    assert len(notes) == 1
+    assert notes[0].end <= 2.0 + 1e-4
+    assert notes[0].start < 2.0
