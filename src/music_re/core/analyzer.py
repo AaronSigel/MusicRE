@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 import librosa
 import numpy as np
 import pyloudnorm as pyln
@@ -68,7 +68,7 @@ def measure_lufs(y: np.ndarray, sr: int) -> float:
         return -70.0
 
 
-def analyze_audio(file_path: Union[str, Path]) -> TrackAnalysis:
+def analyze_audio(file_path: Union[str, Path], stem_name: Optional[str] = None) -> TrackAnalysis:
     """Analyze tempo, key, loudness, and beat grid for audio file."""
     p = Path(file_path).resolve()
     if not p.is_file():
@@ -87,11 +87,16 @@ def analyze_audio(file_path: Union[str, Path]) -> TrackAnalysis:
     # Convert numpy scalar or 1D array to float
     bpm = round(float(np.atleast_1d(tempo)[0]), 2)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
-    # Keep up to 64 beats for compact payload
-    beat_times = [round(t, 3) for t in beat_times[:64]]
+    # Retain full track beat grid
+    beat_times = [round(t, 3) for t in beat_times]
 
-    # Key estimation
-    key, confidence = estimate_key(y, sr)
+    # Key estimation: skip on drums
+    is_drums = (stem_name and stem_name.lower() in ("drums", "percussion")) or p.stem.lower() in ("drums", "percussion")
+    if is_drums:
+        key = "N/A"
+        confidence = 0.0
+    else:
+        key, confidence = estimate_key(y, sr)
 
     # LUFS calculation
     lufs = measure_lufs(y, sr)

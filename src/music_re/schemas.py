@@ -6,7 +6,7 @@ class TrackAnalysis(BaseModel):
     file_path: str
     duration_sec: float
     bpm: float = Field(description="Tempo in beats per minute")
-    key: str = Field(description="Musical key, e.g. 'F# minor'")
+    key: Optional[str] = Field(default="N/A", description="Musical key, e.g. 'F# minor'")
     key_confidence: float
     lufs: float = Field(description="Integrated loudness of track")
     beat_times: List[float] = Field(description="Beat timestamps in seconds")
