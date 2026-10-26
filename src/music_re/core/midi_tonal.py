@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import sys
 import tempfile
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 import pretty_midi
 
 from music_re.core.midi_quantize import quantize_to_timeline
