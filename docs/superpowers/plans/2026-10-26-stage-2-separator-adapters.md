@@ -38,10 +38,10 @@
 - Produces: `SeparatorBackend` ABC with `name`, `model_name`, `supported_stems`, `device`, `load()`, `unload()`, `separate()`
 - Produces: `get_separator_backend(name: str, ...)` and `register_separator_backend(name: str, cls)`
 
-- [ ] **Step 1: Write failing test in `tests/test_separator_base.py` for interface methods and registry**
-- [ ] **Step 2: Run `uv run pytest tests/test_separator_base.py` and verify FAIL**
-- [ ] **Step 3: Implement `separator_base.py` and registry factory in `backends/__init__.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_separator_base.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_separator_base.py` for interface methods and registry**
+- [x] **Step 2: Run `uv run pytest tests/test_separator_base.py` and verify FAIL**
+- [x] **Step 3: Implement `separator_base.py` and registry factory in `backends/__init__.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_separator_base.py` and verify PASS**
 
 ---
 
@@ -56,10 +56,10 @@
 - Produces: `DemucsSeparator(SeparatorBackend)` registered as `"demucs"`
 - Produces: Device resolution (`"auto"`, `"cpu"`, `"cuda"`, `"rocm"`) and memory management
 
-- [ ] **Step 1: Write failing test in `tests/test_demucs_backend.py` for model instantiation, device detection, 4/6 stems, and unload**
-- [ ] **Step 2: Run `uv run pytest tests/test_demucs_backend.py` and verify FAIL**
-- [ ] **Step 3: Implement `DemucsSeparator` wrapping `htdemucs` and `htdemucs_6s` with atomic stem writing**
-- [ ] **Step 4: Run `uv run pytest tests/test_demucs_backend.py` and verify PASS**
+- [x] **Step 1: Write failing test in `tests/test_demucs_backend.py` for model instantiation, device detection, 4/6 stems, and unload**
+- [x] **Step 2: Run `uv run pytest tests/test_demucs_backend.py` and verify FAIL**
+- [x] **Step 3: Implement `DemucsSeparator` wrapping `htdemucs` and `htdemucs_6s` with atomic stem writing**
+- [x] **Step 4: Run `uv run pytest tests/test_demucs_backend.py` and verify PASS**
 
 ---
 
@@ -76,10 +76,10 @@
 - Produces: Backwards-compatible `separate_stems(file_path, workspace, six_stems, device, progress_callback)`
 - Produces: CLI `--device` option in `split` and `deconstruct` commands
 
-- [ ] **Step 1: Update existing tests in `tests/test_separator.py` and `tests/test_cli.py` for `--device` flag**
-- [ ] **Step 2: Run tests to verify test expectations**
-- [ ] **Step 3: Refactor `src/music_re/core/separator.py` to use `DemucsSeparator` and wire `--device` in `src/music_re/cli.py`**
-- [ ] **Step 4: Run `uv run pytest tests/test_separator.py tests/test_cli.py` and verify PASS**
+- [x] **Step 1: Update existing tests in `tests/test_separator.py` and `tests/test_cli.py` for `--device` flag**
+- [x] **Step 2: Run tests to verify test expectations**
+- [x] **Step 3: Refactor `src/music_re/core/separator.py` to use `DemucsSeparator` and wire `--device` in `src/music_re/cli.py`**
+- [x] **Step 4: Run `uv run pytest tests/test_separator.py tests/test_cli.py` and verify PASS**
 
 ---
 
@@ -92,6 +92,6 @@
 - Consumes: Entire backend adapter framework
 - Produces: Verification of third-party pluggable separator, model reuse, and full regression pass
 
-- [ ] **Step 1: Write tests in `tests/test_separator_extensibility.py` registering a mock separator backend and verifying pipeline execution**
-- [ ] **Step 2: Run `uv run pytest tests/test_separator_extensibility.py` and verify PASS**
-- [ ] **Step 3: Run full pytest suite across all tests (50+ tests) and verify 100% green**
+- [x] **Step 1: Write tests in `tests/test_separator_extensibility.py` registering a mock separator backend and verifying pipeline execution**
+- [x] **Step 2: Run `uv run pytest tests/test_separator_extensibility.py` and verify PASS**
+- [x] **Step 3: Run full pytest suite across all tests (50+ tests) and verify 100% green**
