@@ -1,9 +1,11 @@
 from typing import Dict, List, Type
 from music_re.core.backends.separator_base import SeparatorBackend, resolve_device
 from music_re.core.backends.structure_base import StructureAnalyzerBackend
+from music_re.core.backends.transcriber_base import TranscriberBackend
 
 _SEPARATOR_REGISTRY: Dict[str, Type[SeparatorBackend]] = {}
 _STRUCTURE_REGISTRY: Dict[str, Type[StructureAnalyzerBackend]] = {}
+_TRANSCRIBER_REGISTRY: Dict[str, Type[TranscriberBackend]] = {}
 
 
 def register_separator_backend(name: str, backend_cls: Type[SeparatorBackend]) -> None:
@@ -89,3 +91,62 @@ def list_structure_backends() -> List[str]:
         except ImportError:
             pass
     return sorted(_STRUCTURE_REGISTRY.keys())
+
+
+def register_transcriber_backend(name: str, backend_cls: Type[TranscriberBackend]) -> None:
+    """Register a new transcriber backend class."""
+    _TRANSCRIBER_REGISTRY[name.lower()] = backend_cls
+
+
+def get_transcriber_backend(
+    mode: str = "tonal",
+    name: str = "auto",
+    **kwargs,
+) -> TranscriberBackend:
+    """Instantiate a transcriber backend by mode and name."""
+    # Lazy register default backends
+    if "basic_pitch" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.basic_pitch_backend import BasicPitchTranscriber
+            register_transcriber_backend("basic_pitch", BasicPitchTranscriber)
+        except ImportError:
+            pass
+
+    if "drum_multiband" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.drum_backend import DrumTranscriber
+            register_transcriber_backend("drum_multiband", DrumTranscriber)
+        except ImportError:
+            pass
+
+    req_name = name.lower()
+    if req_name == "auto":
+        if mode == "drums":
+            req_name = "drum_multiband"
+        else:
+            req_name = "basic_pitch"
+
+    if req_name not in _TRANSCRIBER_REGISTRY:
+        available = ", ".join(sorted(_TRANSCRIBER_REGISTRY.keys()))
+        raise ValueError(
+            f"Unknown transcriber backend '{name}'. Available backends: {available or 'none'}"
+        )
+
+    return _TRANSCRIBER_REGISTRY[req_name](**kwargs)
+
+
+def list_transcriber_backends() -> List[str]:
+    """List names of registered transcriber backends."""
+    if "basic_pitch" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.basic_pitch_backend import BasicPitchTranscriber
+            register_transcriber_backend("basic_pitch", BasicPitchTranscriber)
+        except ImportError:
+            pass
+    if "drum_multiband" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.drum_backend import DrumTranscriber
+            register_transcriber_backend("drum_multiband", DrumTranscriber)
+        except ImportError:
+            pass
+    return sorted(_TRANSCRIBER_REGISTRY.keys())
