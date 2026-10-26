@@ -5,6 +5,7 @@ import numpy as np
 import pyloudnorm as pyln
 import soundfile as sf
 
+from music_re.core.audio_io import decode_audio
 from music_re.schemas import TrackAnalysis
 
 # Pitch class names
@@ -73,12 +74,13 @@ def analyze_audio(file_path: Union[str, Path]) -> TrackAnalysis:
     if not p.is_file():
         raise FileNotFoundError(f"File not found: {p}")
 
-    info = sf.info(str(p))
-    duration_sec = round(info.duration, 2)
-
-    # Load audio for librosa processing (mono, native/resampled)
     target_sr = 22050
-    y, sr = librosa.load(str(p), sr=target_sr, mono=True)
+    # Unified FFmpeg decoding to avoid audioread deprecation warnings
+    y, sr = decode_audio(p, target_sr=target_sr, normalize_db=None)
+    if y.ndim > 1:
+        y = np.mean(y, axis=1)
+
+    duration_sec = round(float(len(y) / sr), 2)
 
     # Beat tracking
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
