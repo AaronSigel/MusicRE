@@ -29,31 +29,35 @@ def separate_stems(
         workspace = WorkspaceManager()
 
     track_dir = workspace.get_track_dir(p)
-    stems_dir = workspace.get_stems_dir(p)
     model_name = "htdemucs_6s" if six_stems else "htdemucs"
+    stems_dir = workspace.get_stems_dir(p, model_name=model_name)
     expected_stems = STEMS_6 if six_stems else STEMS_4
+
+    # 1. Check cache: segregated model directory first, fallback to legacy stems_dir
+    candidate_dirs = [stems_dir, track_dir / "stems"]
+    for c_dir in candidate_dirs:
+        completion_marker = c_dir / f".complete_{model_name}"
+        if completion_marker.is_file():
+            cached_stems: Dict[str, str] = {}
+            all_cached = True
+            for stem in expected_stems:
+                stem_path = c_dir / f"{stem}.wav"
+                if stem_path.is_file() and stem_path.stat().st_size > 0:
+                    cached_stems[stem] = str(stem_path)
+                else:
+                    all_cached = False
+                    break
+
+            if all_cached:
+                if progress_callback:
+                    progress_callback("Stems retrieved from cache.")
+                return StemSeparationResult(
+                    workspace_dir=str(track_dir),
+                    model_used=model_name,
+                    stems=cached_stems,
+                )
+
     completion_marker = stems_dir / f".complete_{model_name}"
-
-    # 1. Check cache: are all expected stems present and completion marker exists?
-    cached_stems: Dict[str, str] = {}
-    if completion_marker.is_file():
-        all_cached = True
-        for stem in expected_stems:
-            stem_path = stems_dir / f"{stem}.wav"
-            if stem_path.is_file() and stem_path.stat().st_size > 0:
-                cached_stems[stem] = str(stem_path)
-            else:
-                all_cached = False
-                break
-
-        if all_cached:
-            if progress_callback:
-                progress_callback("Stems retrieved from cache.")
-            return StemSeparationResult(
-                workspace_dir=str(track_dir),
-                model_used=model_name,
-                stems=cached_stems,
-            )
 
     # 2. Check for silent audio early to avoid division by zero / NaN assertion errors
     info = sf.info(str(p))
