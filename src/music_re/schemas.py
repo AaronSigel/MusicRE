@@ -1,0 +1,36 @@
+from typing import Dict, List, Optional
+from pydantic import BaseModel, Field
+
+
+class TrackAnalysis(BaseModel):
+    file_path: str
+    duration_sec: float
+    bpm: float = Field(description="Tempo in beats per minute")
+    key: str = Field(description="Musical key, e.g. 'F# minor'")
+    key_confidence: float
+    lufs: float = Field(description="Integrated loudness of track")
+    beat_times: List[float] = Field(description="Beat timestamps in seconds")
+
+
+class StemSeparationResult(BaseModel):
+    workspace_dir: str
+    model_used: str
+    stems: Dict[str, str] = Field(description="Mapping of stem_name to absolute wav path")
+
+
+class NoteEvent(BaseModel):
+    note: str          # e.g. "C#3"
+    pitch: int         # MIDI note number, e.g. 49
+    bar: int           # Bar index (1-indexed)
+    beat_in_bar: float # Beat position within bar (1.0 = on the one)
+    duration_beats: float
+    velocity: int
+
+
+class MidiDigest(BaseModel):
+    midi_path: str
+    bpm: float
+    instrument_type: str  # "tonal" | "drums"
+    total_notes: int
+    bars_analyzed: str    # e.g. "1-8"
+    notes: List[NoteEvent]
