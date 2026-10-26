@@ -25,17 +25,29 @@ def generate_midi_digest(
 
     pm = pretty_midi.PrettyMIDI(str(p))
 
+    # Detect beats per bar from time signature changes, default 4 (4/4 time)
+    beats_per_bar = 4
+    if pm.time_signature_changes:
+        beats_per_bar = max(1, pm.time_signature_changes[0].numerator)
+
     note_events: List[NoteEvent] = []
 
-    # Gather notes from all instruments or matching type
+    # Filter instruments by instrument_type
+    target_type = instrument_type.lower()
+
     for inst in pm.instruments:
+        if target_type == "drums" and not inst.is_drum:
+            continue
+        if target_type == "tonal" and inst.is_drum:
+            continue
+
         for note in inst.notes:
             total_beats = (note.start * bpm) / 60.0
-            bar = int(total_beats // 4) + 1
+            bar = int(total_beats // beats_per_bar) + 1
             if bar < start_bar or bar > end_bar:
                 continue
 
-            beat_in_bar = round((total_beats % 4) + 1.0, 3)
+            beat_in_bar = round((total_beats % beats_per_bar) + 1.0, 3)
             duration_beats = round(((note.end - note.start) * bpm) / 60.0, 3)
             note_name = pretty_midi.note_number_to_name(note.pitch)
 

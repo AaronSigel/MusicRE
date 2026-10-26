@@ -9,6 +9,7 @@ dependencies = [
     "rich>=13.7.0",
     "mcp[cli]>=1.2.0,<2.0.0",
     "pydantic>=2.7.0",
+    "setuptools<72.0.0",
     "soundfile>=0.12.1",
     "mutagen>=1.47.0",
     "pyloudnorm>=0.1.1",

@@ -10,6 +10,9 @@ def _bandpass_filter(
     y: np.ndarray, sr: int, low_cut: float, high_cut: float, order: int = 3
 ) -> np.ndarray:
     """Butterworth bandpass filter."""
+    if len(y) <= 21:
+        return y
+
     nyquist = 0.5 * sr
     low = max(0.001, low_cut / nyquist)
     high = min(0.999, high_cut / nyquist)
@@ -25,11 +28,8 @@ def _detect_band_onsets(
     pitch: int,
     delta: float = 0.08,
 ) -> List[Tuple[float, int, int]]:
-    """Detect onsets in filtered audio band and estimate RMS velocity.
-
-    Returns list of (start_sec, pitch, velocity).
-    """
-    if len(filtered_audio) == 0 or np.max(np.abs(filtered_audio)) < 1e-4:
+    """Detect onsets in filtered audio band and estimate RMS velocity."""
+    if len(filtered_audio) <= 21 or np.max(np.abs(filtered_audio)) < 1e-4:
         return []
 
     # Onset detection using spectral flux
@@ -76,8 +76,16 @@ def transcribe_drums(
 
     out_p.parent.mkdir(parents=True, exist_ok=True)
 
+    pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
+    drum_instrument = pretty_midi.Instrument(program=0, is_drum=True, name="Drums")
+
     sr = 22050
     y, _ = librosa.load(str(in_p), sr=sr, mono=True)
+
+    if len(y) <= 21 or np.max(np.abs(y)) < 1e-5:
+        pm.instruments.append(drum_instrument)
+        pm.write(str(out_p))
+        return out_p
 
     # Multi-band frequency definitions:
     # 1. Kick (MIDI 36): 30 Hz - 140 Hz
@@ -97,9 +105,6 @@ def transcribe_drums(
 
     # Sort events by time
     all_events.sort(key=lambda x: x[0])
-
-    pm = pretty_midi.PrettyMIDI(initial_tempo=bpm)
-    drum_instrument = pretty_midi.Instrument(program=0, is_drum=True, name="Drums")
 
     # Quantize to 16th note grid
     grid_sec = (60.0 / bpm) * 0.25

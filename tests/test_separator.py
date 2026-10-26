@@ -17,6 +17,7 @@ def test_separate_stems_uses_cache(tmp_path: Path):
     (stems_dir / "drums.wav").write_bytes(b"RIFF" + b"\x00" * 100)
     (stems_dir / "bass.wav").write_bytes(b"RIFF" + b"\x00" * 100)
     (stems_dir / "other.wav").write_bytes(b"RIFF" + b"\x00" * 100)
+    (stems_dir / ".complete_htdemucs").write_text("ok")
 
     result = separate_stems(track_file, workspace=ws, six_stems=False)
     assert isinstance(result, StemSeparationResult)
