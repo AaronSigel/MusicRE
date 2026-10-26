@@ -11,9 +11,19 @@ data/
 /hardware_verification.json
 /license_audit.json
 /benchmark_report.json
-docs/superpowers/*
-!docs/superpowers/plans/
-docs/superpowers/plans/*
-!docs/superpowers/plans/2026-10-26-v1-corrective-cycle.md
+docs/superpowers/
+docs/verification/
 .music_re_cache/
 FeasibilityReport.md
+
+# Logs & diagnostics
+*.log
+
+# Audio & generated deliverables
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.mid
+*.midi
+*.zip
