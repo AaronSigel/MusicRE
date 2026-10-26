@@ -7,10 +7,12 @@ from rich.table import Table
 
 from music_re.core.analyzer import analyze_audio
 from music_re.core.backends import get_structure_analyzer, get_transcriber_backend
+from music_re.core.export import export_bundle
 from music_re.core.midi_digest import generate_midi_digest
 from music_re.core.midi_drums import transcribe_drums
 from music_re.core.midi_project import build_combined_midi_project
 from music_re.core.midi_tonal import transcribe_tonal
+from music_re.core.quality import evaluate_quality
 from music_re.core.separator import separate_stems
 from music_re.core.slicer import slice_audio
 from music_re.schemas import MusicalTimeline
@@ -208,11 +210,65 @@ def cmd_inspect_midi(
     console.print(f"[dim]Total notes in range: {digest.total_notes}[/dim]")
 
 
+@app.command("evaluate")
+def cmd_evaluate(
+    file: Path = typer.Argument(..., help="Path to input audio file"),
+    ground_truth_stems: Optional[Path] = typer.Option(None, "--gt-stems", help="Directory with ground truth stem WAV files"),
+    ground_truth_midi: Optional[Path] = typer.Option(None, "--gt-midi", help="Ground truth MIDI file"),
+    as_json: bool = typer.Option(False, "--json", help="Output raw JSON"),
+):
+    """Evaluate decomposition and transcription quality (quality_report.json)."""
+    ws = WorkspaceManager()
+    report = evaluate_quality(
+        workspace=ws,
+        file_path=file,
+        ground_truth_stems=ground_truth_stems,
+        ground_truth_midi=ground_truth_midi,
+    )
+    ws.save_quality_report(file, report)
+
+    if as_json:
+        console.print(report.model_dump_json(indent=2))
+        return
+
+    table = Table(title=f"Quality Evaluation: {file.name}")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="magenta")
+    mode_desc = "Objective (Ground Truth)" if report.is_objective else "Diagnostic Heuristic (No Ground Truth)"
+    table.add_row("Evaluation Mode", mode_desc)
+    table.add_row("Peak Level", f"{report.audio_diagnostics.get('peak_dbfs', 0.0):.2f} dBFS")
+    table.add_row("Clipping Samples", str(report.audio_diagnostics.get('clipping_samples', 0)))
+
+    if report.is_objective:
+        table.add_row("Average SDR", f"{report.separation_metrics.get('average_sdr_db', 0.0):.2f} dB")
+        if "onset_f1" in report.transcription_metrics:
+            table.add_row("Note Onset F1", f"{report.transcription_metrics['onset_f1']:.3f}")
+    else:
+        table.add_row("Residual Reconstruction", f"{report.separation_metrics.get('residual_reconstruction_db', 0.0):.2f} dB")
+        table.add_row("Total Notes", str(report.transcription_metrics.get('total_notes', 0)))
+
+    console.print(table)
+
+
+@app.command("export")
+def cmd_export(
+    file: Path = typer.Argument(..., help="Path to input audio file"),
+    out: Path = typer.Option(..., "--out", "-o", help="Target output directory or zip file"),
+    profile: str = typer.Option("balanced", "--profile", "-p", help="Export profile: 'fast', 'balanced', 'quality'"),
+    archive: bool = typer.Option(False, "--zip", "-z", help="Export as a zip archive"),
+):
+    """Export all reversed audio stems, MIDIs, timeline, and reports into a clean deliverable bundle."""
+    ws = WorkspaceManager()
+    res = export_bundle(workspace=ws, file_path=file, target_path=out, profile=profile, archive=archive)
+    console.print(f"[bold green]Export complete:[/bold green] {res}")
+
+
 @app.command("deconstruct")
 def cmd_deconstruct(
     file: Path = typer.Argument(..., help="Path to input audio file"),
     six_stems: bool = typer.Option(False, "--six-stems", "-6", help="Extract 6 stems"),
     device: str = typer.Option("auto", "--device", "-d", help="Computation device: 'auto', 'cpu', 'cuda'"),
+    profile: str = typer.Option("balanced", "--profile", "-p", help="Execution profile: 'fast', 'balanced', 'quality'"),
 ):
     """Run full reverse engineering pipeline: split -> analyze -> midi transcribe with resumption and error handling."""
     ws = WorkspaceManager()
@@ -339,6 +395,11 @@ def cmd_deconstruct(
 
         ws.mark_stage_complete(file, "transcription", artifacts=midi_outputs)
         ws.update_manifest(file, status="completed", current_stage="completed")
+
+        # 5. Evaluate quality if profile is balanced or quality
+        if profile in ("balanced", "quality"):
+            report = evaluate_quality(ws, file)
+            ws.save_quality_report(file, report)
     except Exception as e:
         ws.record_stage_error(file, "transcription", str(e))
         console.print(f"[red]Transcription stage failed:[/red] {e}")
