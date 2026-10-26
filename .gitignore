@@ -12,4 +12,7 @@ data/
 *.json
 docs/superpowers/
 .music_re_cache/
+FeasibilityReport.md
 
+data/
+FeasibilityReport.md
