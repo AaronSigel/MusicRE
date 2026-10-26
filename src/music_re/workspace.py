@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from music_re.schemas import WorkspaceManifest
+
 
 def compute_file_content_hash(path: Union[str, Path], chunk_size: int = 64 * 1024) -> str:
     """Compute 16-character SHA256 hex digest by streaming the entire file."""
@@ -76,3 +78,73 @@ class WorkspaceManager:
             return None
         with open(meta_file, "r", encoding="utf-8") as f:
             return json.load(f)
+
+    def get_manifest_path(self, file_path: Union[str, Path]) -> Path:
+        return self.get_track_dir(file_path) / "manifest.json"
+
+    def get_manifest(self, file_path: Union[str, Path]) -> WorkspaceManifest:
+        m_path = self.get_manifest_path(file_path)
+        if m_path.exists():
+            with open(m_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return WorkspaceManifest(**data)
+
+        p = Path(file_path).resolve()
+        content_hash = compute_file_content_hash(p)
+        manifest = WorkspaceManifest(
+            track_id=content_hash,
+            input_file=str(p),
+            status="pending",
+        )
+        self.save_manifest(file_path, manifest)
+        return manifest
+
+    def save_manifest(self, file_path: Union[str, Path], manifest: WorkspaceManifest) -> Path:
+        m_path = self.get_manifest_path(file_path)
+        tmp_file = m_path.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(manifest.model_dump(), f, indent=2, ensure_ascii=False)
+        tmp_file.replace(m_path)
+        return m_path
+
+    def update_manifest(self, file_path: Union[str, Path], **kwargs) -> WorkspaceManifest:
+        manifest = self.get_manifest(file_path)
+        for k, v in kwargs.items():
+            if hasattr(manifest, k):
+                setattr(manifest, k, v)
+        self.save_manifest(file_path, manifest)
+        return manifest
+
+    def mark_stage_complete(
+        self,
+        file_path: Union[str, Path],
+        stage: str,
+        artifacts: Optional[Dict[str, Any]] = None,
+    ) -> WorkspaceManifest:
+        manifest = self.get_manifest(file_path)
+        if stage not in manifest.completed_stages:
+            manifest.completed_stages.append(stage)
+        if artifacts:
+            if stage == "separation":
+                manifest.stems.update(artifacts)
+            elif stage == "analysis":
+                manifest.analysis = artifacts
+            elif stage == "transcription":
+                manifest.midis.update(artifacts)
+        if stage in manifest.stage_errors:
+            del manifest.stage_errors[stage]
+        self.save_manifest(file_path, manifest)
+        return manifest
+
+    def record_stage_error(
+        self,
+        file_path: Union[str, Path],
+        stage: str,
+        error_message: str,
+    ) -> WorkspaceManifest:
+        manifest = self.get_manifest(file_path)
+        manifest.status = "failed"
+        manifest.current_stage = stage
+        manifest.stage_errors[stage] = error_message
+        self.save_manifest(file_path, manifest)
+        return manifest

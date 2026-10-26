@@ -142,33 +142,84 @@ def cmd_deconstruct(
     file: Path = typer.Argument(..., help="Path to input audio file"),
     six_stems: bool = typer.Option(False, "--six-stems", "-6", help="Extract 6 stems"),
 ):
-    """Run full reverse engineering pipeline: split -> analyze -> midi transcribe."""
+    """Run full reverse engineering pipeline: split -> analyze -> midi transcribe with resumption and error handling."""
     ws = WorkspaceManager()
+    track_dir = ws.get_track_dir(file)
+    manifest = ws.get_manifest(file)
     console.print(f"[bold cyan]Starting deconstruct pipeline for {file.name}...[/bold cyan]")
+    ws.update_manifest(file, status="processing")
 
     # 1. Split stems
-    split_res = separate_stems(file, workspace=ws, six_stems=six_stems, progress_callback=console.print)
+    if "separation" in manifest.completed_stages and manifest.stems:
+        console.print("[green]Reusing previously separated stems from workspace.[/green]")
+        stems_dict = manifest.stems
+    else:
+        try:
+            ws.update_manifest(file, current_stage="separation")
+            split_res = separate_stems(file, workspace=ws, six_stems=six_stems, progress_callback=console.print)
+            stems_dict = split_res.stems
+            ws.mark_stage_complete(file, "separation", artifacts=stems_dict)
+        except Exception as e:
+            ws.record_stage_error(file, "separation", str(e))
+            console.print(f"[red]Separation stage failed:[/red] {e}")
+            raise typer.Exit(code=1)
 
-    # 2. Analyze tempo using drums or full track
-    analysis_src = split_res.stems.get("drums", str(file))
-    analysis = analyze_audio(analysis_src)
-    bpm = analysis.bpm if analysis.bpm > 0 else 120.0
-    ws.save_metadata(file, analysis.model_dump())
-    console.print(f"[green]Detected BPM:[/green] {bpm:.2f}, [green]Key:[/green] {analysis.key}")
+    # 2. Acoustic Analysis
+    if "analysis" in manifest.completed_stages and manifest.analysis:
+        console.print("[green]Reusing acoustic analysis from workspace.[/green]")
+        bpm = manifest.analysis.get("bpm", 120.0)
+        key = manifest.analysis.get("key", "N/A")
+    else:
+        try:
+            ws.update_manifest(file, current_stage="analysis")
+            # Analyze whole track for key and loudness, drums for tempo grid
+            mix_analysis = analyze_audio(file)
+            if "drums" in stems_dict:
+                drum_analysis = analyze_audio(stems_dict["drums"], stem_name="drums")
+                bpm = drum_analysis.bpm if drum_analysis.bpm > 0 else mix_analysis.bpm
+            else:
+                bpm = mix_analysis.bpm
+
+            key = mix_analysis.key
+            analysis_dict = {
+                "bpm": bpm,
+                "key": key,
+                "key_confidence": mix_analysis.key_confidence,
+                "lufs": mix_analysis.lufs,
+                "duration_sec": mix_analysis.duration_sec,
+                "beat_times": mix_analysis.beat_times,
+            }
+            ws.save_metadata(file, analysis_dict)
+            ws.mark_stage_complete(file, "analysis", artifacts=analysis_dict)
+            console.print(f"[green]Detected BPM:[/green] {bpm:.2f}, [green]Key:[/green] {key}")
+        except Exception as e:
+            ws.record_stage_error(file, "analysis", str(e))
+            console.print(f"[red]Analysis stage failed:[/red] {e}")
+            raise typer.Exit(code=1)
 
     # 3. Transcribe stems to MIDI
-    midi_outputs = {}
-    track_dir = ws.get_track_dir(file)
     midis_dir = track_dir / "midis"
     midis_dir.mkdir(parents=True, exist_ok=True)
+    midi_outputs = dict(manifest.midis)
 
-    for stem_name, stem_path in split_res.stems.items():
-        out_mid = midis_dir / f"{stem_name}.mid"
-        if stem_name == "drums":
-            transcribe_drums(stem_path, out_mid, bpm=bpm)
-        else:
-            transcribe_tonal(stem_path, out_mid, bpm=bpm)
-        midi_outputs[stem_name] = str(out_mid)
+    try:
+        ws.update_manifest(file, current_stage="transcription")
+        for stem_name, stem_path in stems_dict.items():
+            if stem_name in midi_outputs and Path(midi_outputs[stem_name]).is_file():
+                continue
+            out_mid = midis_dir / f"{stem_name}.mid"
+            if stem_name == "drums":
+                transcribe_drums(stem_path, out_mid, bpm=bpm)
+            else:
+                transcribe_tonal(stem_path, out_mid, bpm=bpm)
+            midi_outputs[stem_name] = str(out_mid)
+
+        ws.mark_stage_complete(file, "transcription", artifacts=midi_outputs)
+        ws.update_manifest(file, status="completed", current_stage="completed")
+    except Exception as e:
+        ws.record_stage_error(file, "transcription", str(e))
+        console.print(f"[red]Transcription stage failed:[/red] {e}")
+        raise typer.Exit(code=1)
 
     console.print(f"[bold green]Deconstruct complete! Workspace:[/bold green] {track_dir}")
     for name, path in midi_outputs.items():

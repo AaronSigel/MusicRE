@@ -1,5 +1,17 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+
+class WorkspaceManifest(BaseModel):
+    track_id: str
+    input_file: str
+    status: str = Field(default="pending", description="'pending' | 'processing' | 'completed' | 'failed'")
+    current_stage: str = Field(default="none")
+    completed_stages: List[str] = Field(default_factory=list)
+    stage_errors: Dict[str, str] = Field(default_factory=dict)
+    stems: Dict[str, str] = Field(default_factory=dict)
+    analysis: Optional[Dict[str, Any]] = None
+    midis: Dict[str, str] = Field(default_factory=dict)
 
 
 class TrackAnalysis(BaseModel):
