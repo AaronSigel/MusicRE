@@ -61,11 +61,18 @@ def cmd_analyze(
 def cmd_split(
     file: Path = typer.Argument(..., help="Path to input audio file"),
     six_stems: bool = typer.Option(False, "--six-stems", "-6", help="Extract 6 stems (includes guitar & piano)"),
+    device: str = typer.Option("auto", "--device", "-d", help="Computation device: 'auto', 'cpu', 'cuda'"),
 ):
     """Separate audio into stems (Demucs) using cache."""
     ws = WorkspaceManager()
     console.print(f"[cyan]Separating stems for {file.name}...[/cyan]")
-    result = separate_stems(file, workspace=ws, six_stems=six_stems, progress_callback=console.print)
+    result = separate_stems(
+        file,
+        workspace=ws,
+        six_stems=six_stems,
+        device=device,
+        progress_callback=console.print,
+    )
 
     table = Table(title=f"Stems: {file.name} ({result.model_used})")
     table.add_column("Stem", style="cyan")
@@ -141,6 +148,7 @@ def cmd_inspect_midi(
 def cmd_deconstruct(
     file: Path = typer.Argument(..., help="Path to input audio file"),
     six_stems: bool = typer.Option(False, "--six-stems", "-6", help="Extract 6 stems"),
+    device: str = typer.Option("auto", "--device", "-d", help="Computation device: 'auto', 'cpu', 'cuda'"),
 ):
     """Run full reverse engineering pipeline: split -> analyze -> midi transcribe with resumption and error handling."""
     ws = WorkspaceManager()
@@ -162,7 +170,13 @@ def cmd_deconstruct(
     else:
         try:
             ws.update_manifest(file, current_stage="separation")
-            split_res = separate_stems(file, workspace=ws, six_stems=six_stems, progress_callback=console.print)
+            split_res = separate_stems(
+                file,
+                workspace=ws,
+                six_stems=six_stems,
+                device=device,
+                progress_callback=console.print,
+            )
             stems_dict = split_res.stems
             ws.mark_stage_complete(file, "separation", artifacts=stems_dict)
         except Exception as e:
