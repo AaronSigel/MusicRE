@@ -7,6 +7,9 @@ import tempfile
 from typing import Dict, List, Union
 import pretty_midi
 
+from music_re.core.midi_quantize import quantize_to_timeline
+from music_re.schemas import MusicalTimeline
+
 
 def clean_and_quantize_midi(
     input_midi_path: Union[str, Path],
@@ -14,78 +17,22 @@ def clean_and_quantize_midi(
     bpm: float = 120.0,
     min_duration: float = 0.05,
     quantize_grid: float = 0.25,  # 0.25 = 16th note in 4/4
+    timeline: Optional[MusicalTimeline] = None,
 ) -> Path:
-    """Filter out noise artifacts, deduplicate/truncate overlapping same-pitch notes, and quantize onsets."""
+    """Filter out noise artifacts, deduplicate overlapping notes, and quantize onsets (statically or via timeline)."""
     in_p = Path(input_midi_path).resolve()
     out_p = Path(output_midi_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
 
     pm = pretty_midi.PrettyMIDI(str(in_p), initial_tempo=bpm)
-    grid_sec = (60.0 / bpm) * quantize_grid
-
-    for instrument in pm.instruments:
-        if instrument.is_drum:
-            continue
-
-        # 1. Filter out micro-noise and quantize onsets
-        valid_notes: List[pretty_midi.Note] = []
-        for note in instrument.notes:
-            duration = note.end - note.start
-            if duration < min_duration:
-                continue
-
-            snapped_start = round(note.start / grid_sec) * grid_sec
-            snapped_end = max(snapped_start + min_duration, note.end)
-
-            valid_notes.append(
-                pretty_midi.Note(
-                    velocity=note.velocity,
-                    pitch=note.pitch,
-                    start=snapped_start,
-                    end=snapped_end,
-                )
-            )
-
-        # 2. Group notes by pitch to eliminate polyphonic same-pitch overlaps/conflicts
-        pitch_groups: Dict[int, List[pretty_midi.Note]] = {}
-        for n in valid_notes:
-            pitch_groups.setdefault(n.pitch, []).append(n)
-
-        cleaned_notes: List[pretty_midi.Note] = []
-        for pitch, p_notes in pitch_groups.items():
-            # Sort by start time, then end time
-            p_notes.sort(key=lambda x: (x.start, x.end))
-            resolved: List[pretty_midi.Note] = []
-
-            for n in p_notes:
-                if not resolved:
-                    resolved.append(n)
-                    continue
-
-                prev = resolved[-1]
-                if n.start < prev.end:
-                    # Duplicate onset or micro-gap -> merge
-                    if abs(n.start - prev.start) < min_duration:
-                        prev.end = max(prev.end, n.end)
-                        prev.velocity = max(prev.velocity, n.velocity)
-                    else:
-                        # Truncate previous note before next onset
-                        prev.end = n.start
-                        if prev.end > prev.start:
-                            resolved.append(n)
-                        else:
-                            # Previous note was completely consumed, replace it
-                            resolved[-1] = n
-                else:
-                    resolved.append(n)
-
-            cleaned_notes.extend(resolved)
-
-        # 3. Sort all notes chronologically
-        cleaned_notes.sort(key=lambda n: (n.start, n.pitch))
-        instrument.notes = cleaned_notes
-
-    pm.write(str(out_p))
+    quantized_pm = quantize_to_timeline(
+        pm=pm,
+        timeline=timeline,
+        bpm=bpm,
+        grid_subdivisions=4,
+        min_duration=min_duration,
+    )
+    quantized_pm.write(str(out_p))
     return out_p
 
 
@@ -94,6 +41,7 @@ def transcribe_tonal(
     output_midi_path: Union[str, Path],
     bpm: float = 120.0,
     save_raw_copy: bool = True,
+    timeline: Optional[MusicalTimeline] = None,
 ) -> Path:
     """Transcribe melodic audio stem to MIDI using Basic Pitch, save raw unquantized copy, and clean result."""
     in_p = Path(audio_path).resolve()
@@ -142,6 +90,6 @@ def transcribe_tonal(
             raw_out_p = out_p.with_name(f"{out_p.stem}_raw{out_p.suffix}")
             shutil.copy2(str(raw_midi), str(raw_out_p))
 
-        clean_and_quantize_midi(raw_midi, out_p, bpm=bpm)
+        clean_and_quantize_midi(raw_midi, out_p, bpm=bpm, timeline=timeline)
 
     return out_p

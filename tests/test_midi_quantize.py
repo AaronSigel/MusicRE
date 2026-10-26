@@ -1,0 +1,56 @@
+import pretty_midi
+import pytest
+
+from music_re.core.midi_quantize import quantize_to_timeline
+from music_re.schemas import MusicalTimeline
+
+def test_quantize_static_bpm_fallback():
+    pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
+    inst = pretty_midi.Instrument(program=0)
+    # At 120 bpm, 1 beat = 0.5s, 16th note = 0.125s
+    # Note starts at 0.11s -> should snap to 0.125s
+    inst.notes.append(pretty_midi.Note(velocity=100, pitch=60, start=0.11, end=0.4))
+    pm.instruments.append(inst)
+
+    quantized = quantize_to_timeline(pm, timeline=None, bpm=120.0, grid_subdivisions=4)
+    assert len(quantized.instruments[0].notes) == 1
+    note = quantized.instruments[0].notes[0]
+    assert note.start == pytest.approx(0.125, abs=1e-3)
+    assert note.end >= note.start + 0.05
+
+def test_quantize_dynamic_timeline_drifty_beats():
+    # Beats with tempo drift: beat 0 at 0.0s, beat 1 at 0.8s
+    # Subdivisions (4): 0.0, 0.2, 0.4, 0.6, 0.8
+    tl = MusicalTimeline(
+        duration_sec=2.0,
+        bpm=75.0,
+        beats=[0.0, 0.8, 1.6],
+        downbeats=[0.0],
+        sections=[],
+    )
+
+    pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
+    inst = pretty_midi.Instrument(program=0)
+    # Note onset at 0.19s -> snaps to dynamic 0.2s subdivision
+    inst.notes.append(pretty_midi.Note(velocity=100, pitch=64, start=0.19, end=0.7))
+    pm.instruments.append(inst)
+
+    quantized = quantize_to_timeline(pm, timeline=tl, grid_subdivisions=4)
+    note = quantized.instruments[0].notes[0]
+    assert note.start == pytest.approx(0.2, abs=1e-3)
+
+def test_quantize_eliminates_polyphonic_overlaps():
+    pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
+    inst = pretty_midi.Instrument(program=0)
+    # Pitch 60: 0.0 -> 1.0s
+    inst.notes.append(pretty_midi.Note(velocity=100, pitch=60, start=0.0, end=1.0))
+    # Intervening pitch 65: 0.2 -> 0.8s
+    inst.notes.append(pretty_midi.Note(velocity=80, pitch=65, start=0.2, end=0.8))
+    # Pitch 60 overlaps: 0.5 -> 1.5s
+    inst.notes.append(pretty_midi.Note(velocity=110, pitch=60, start=0.5, end=1.5))
+    pm.instruments.append(inst)
+
+    quantized = quantize_to_timeline(pm, timeline=None, bpm=120.0)
+    p60_notes = [n for n in quantized.instruments[0].notes if n.pitch == 60]
+    for i in range(len(p60_notes) - 1):
+        assert p60_notes[i].end <= p60_notes[i + 1].start
