@@ -99,6 +99,15 @@ def test_drum_class_breakdown_scores_kick_snare_separately(tmp_path):
     assert metrics['drums_by_class']['kick']['f1'] == 1.0
     assert metrics['drums_by_class']['snare']['f1'] == 0.0
     assert metrics['drums_by_class']['hihat']['f1'] == 0.0
+    # A 0.0 f1 is ambiguous without knowing how many events existed on each
+    # side: "ref had notes, none matched" vs "ref had no notes at all" read
+    # very differently. Expose the raw counts, not just the derived score.
+    assert metrics['drums_by_class']['snare'] == {
+        'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'ref_count': 1, 'est_count': 0,
+    }
+    assert metrics['drums_by_class']['hihat'] == {
+        'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'ref_count': 0, 'est_count': 1,
+    }
 
 
 def test_drum_class_breakdown_counts_other_gm_kit_pitches_in_each_class(tmp_path):

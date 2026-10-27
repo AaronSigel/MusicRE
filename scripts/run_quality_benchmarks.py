@@ -136,6 +136,16 @@ def _fmt(value) -> str:
     return f"{value:.3f}" if isinstance(value, float) else str(value)
 
 
+def _fmt_drum_class(class_metrics) -> str:
+    """f1 alone can't tell "the model found nothing" (ref_count=0) apart
+    from "the model found events, all wrong" (ref_count>0, est_count>0,
+    zero overlap) -- show the raw counts beside the derived score."""
+    if not class_metrics:
+        return "-"
+    return (f"{_fmt(class_metrics.get('f1'))} "
+            f"(ref={class_metrics.get('ref_count', '?')}, est={class_metrics.get('est_count', '?')})")
+
+
 def render_markdown_report(report: dict) -> str:
     lines = ["# BenchmarkReport", "", f"Git revision: `{report.get('git_revision', 'unknown')}`", ""]
 
@@ -154,15 +164,23 @@ def render_markdown_report(report: dict) -> str:
             _fmt(sep.get("average_sdr_db")),
             _fmt((trans.get("pitched") or {}).get("onset_pitch_f1")),
             _fmt((trans.get("drums") or {}).get("onset_pitch_f1")),
-            _fmt((by_class.get("kick") or {}).get("f1")),
-            _fmt((by_class.get("snare") or {}).get("f1")),
-            _fmt((by_class.get("hihat") or {}).get("f1")),
+            _fmt_drum_class(by_class.get("kick")),
+            _fmt_drum_class(by_class.get("snare")),
+            _fmt_drum_class(by_class.get("hihat")),
             ", ".join(f"{k}={v}" for k, v in false_notes.items()) or "-",
             _fmt(entry.get("wall_time_sec")),
             _fmt(entry.get("peak_ram_mb")),
             entry.get("error") or "-",
         ]
         lines.append("| " + " | ".join(str(c) for c in row) + " |")
+
+    lines += ["", "## Per-stem separation (SDR)", "",
+              "An average SDR hides whether every instrument separated equally well.",
+              "", "| Track | Stem | SDR (dB) |", "|---|---|---|"]
+    for entry in report.get("reference_tracks", []):
+        sep = (entry.get("quality_report") or {}).get("separation_metrics") or {}
+        for stem, value in (sep.get("sdr") or {}).items():
+            lines.append(f"| {entry['track_id']} | {stem} | {_fmt(value)} |")
 
     lines += ["", "## Real-track spot checks (no ground truth \u2014 manual review)", ""]
     spotcheck = report.get("manual_spotcheck") or []

@@ -99,3 +99,31 @@ def test_render_markdown_report_lists_every_track():
               "manual_spotcheck": [], "git_revision": "bc5ae18"}
     md = render_markdown_report(report)
     assert "Track00001" in md and "bc5ae18" in md
+
+
+def test_render_markdown_report_shows_per_stem_sdr_and_drum_class_counts():
+    # An average SDR hides whether every stem separated equally well, and a
+    # 0.0 drum-class F1 is ambiguous without the raw ref/est note counts
+    # behind it (real user feedback on a real benchmark run).
+    report = {"reference_tracks": [{
+        "track_id": "Track00001",
+        "quality_report": {
+            "separation_metrics": {"average_sdr_db": 14.625,
+                                    "sdr": {"drums": 14.397, "bass": 13.113, "other": 16.365}},
+            "transcription_metrics": {"drums_by_class": {
+                "snare": {"precision": 0.0, "recall": 0.0, "f1": 0.0, "ref_count": 1, "est_count": 0},
+                "hihat": {"precision": 0.0, "recall": 0.0, "f1": 0.0, "ref_count": 0, "est_count": 1},
+            }},
+        },
+        "wall_time_sec": 1.2, "peak_ram_mb": 300.0, "error": None,
+        "false_notes_on_absent_instrument": {},
+    }], "manual_spotcheck": [], "git_revision": "bc5ae18"}
+
+    md = render_markdown_report(report)
+
+    assert "## Per-stem separation (SDR)" in md
+    assert "drums" in md and "14.397" in md
+    assert "bass" in md and "13.113" in md
+    assert "other" in md and "16.365" in md
+    assert "ref=1, est=0" in md  # snare: the model found nothing, not "wrong but present"
+    assert "ref=0, est=1" in md  # hihat: a pure false positive, not a miss on a real event

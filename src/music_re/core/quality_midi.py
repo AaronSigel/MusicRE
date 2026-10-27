@@ -81,7 +81,8 @@ def transcription_quality(midis, ground_truth=None):
                     est_class = [n for n in est_notes if n.pitch in pitches]
                     if not ref_class and not est_class:
                         continue
-                    by_class[name] = _score(ref_class, est_class, offsets=False)
+                    by_class[name] = {**_score(ref_class, est_class, offsets=False),
+                                      'ref_count': len(ref_class), 'est_count': len(est_class)}
                 if by_class:
                     metrics['drums_by_class'] = by_class
             metrics['comparisons'] += 1
