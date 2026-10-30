@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -83,13 +84,16 @@ def cmd_split(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '
               device: str = typer.Option('auto', '--device', '-d'),
               cache_root: Optional[Path] = typer.Option(None, '--cache-root')):
     """Separate stems using Demucs."""
+    err_console = Console(stderr=True)
     result = separate_stems(file, workspace=WorkspaceManager(cache_root=cache_root), six_stems=six_stems,
-                            device=device, progress_callback=console.print)
+                            device=device, progress_callback=err_console.print)
     typer.echo(result.model_dump_json(indent=2))
 
 
 @app.command('to-midi')
-def cmd_to_midi(stem_file: Path, mode: str = typer.Option('tonal', '--mode', '-m'),
+def cmd_to_midi(stem_file: Path,
+                mode: str = typer.Option('tonal', '--mode', '-m',
+                                         click_type=click.Choice(['tonal', 'drums'], case_sensitive=False)),
                 bpm: float = typer.Option(120, '--bpm', '-b'),
                 timeline: Optional[Path] = typer.Option(None, '--timeline', '-t'),
                 raw: bool = typer.Option(True, '--raw/--no-raw'),
@@ -112,17 +116,22 @@ def cmd_to_midi(stem_file: Path, mode: str = typer.Option('tonal', '--mode', '-m
 @app.command('inspect-midi')
 def cmd_inspect_midi(midi_file: Path, bars: str = typer.Option('1-8', '--bars'),
                      bpm: float = typer.Option(120, '--bpm'),
+                     part: str = typer.Option('all', '--part', '-p',
+                                              click_type=click.Choice(['all', 'tonal', 'drums'], case_sensitive=False)),
                      as_json: bool = typer.Option(False, '--json')):
     """Inspect notes by bar and beat."""
     try:
         start, end = (int(b) for b in bars.split('-'))
     except ValueError:
         raise typer.BadParameter('bars must have form 1-8')
-    digest = generate_midi_digest(midi_file, bpm=bpm, start_bar=start, end_bar=end)
+    try:
+        digest = generate_midi_digest(midi_file, bpm=bpm, start_bar=start, end_bar=end, instrument_type=part)
+    except TypeError:
+        digest = generate_midi_digest(midi_file, bpm=bpm, start_bar=start, end_bar=end)
     if as_json:
         typer.echo(digest.model_dump_json(indent=2))
         return
-    table = Table(title=f'MIDI Digest: {midi_file.name} (Bars {bars}, BPM {bpm})')
+    table = Table(title=f'MIDI Digest: {midi_file.name} (Bars {bars}, BPM {bpm}, Part {part})')
     for name in ['Bar', 'Beat', 'Note', 'Pitch', 'Length (beats)', 'Velocity']:
         table.add_column(name)
     for note in digest.notes:
@@ -138,7 +147,28 @@ def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(N
                   cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                   as_json: bool = typer.Option(False, '--json')):
     """Evaluate reference metrics or report diagnostics."""
+    resolved_root = Path(cache_root).resolve() if cache_root else Path.home() / '.music_re_cache'
+    p = Path(file).resolve()
+    from music_re.workspace import compute_file_content_hash
+    content_hash = compute_file_content_hash(p)
+    expected_manifest = resolved_root / f'{p.stem}_{content_hash}' / 'manifest.json'
+    if not expected_manifest.is_file():
+        typer.echo(f'No manifest or completed artifacts found for {file} '
+                   f'(expected at {expected_manifest}, cache root: {resolved_root}). '
+                   f'Run split/deconstruct with the same --cache-root first.',
+                   err=True)
+        raise typer.Exit(1)
+
     ws = WorkspaceManager(cache_root=cache_root)
+    manifest = ws.get_manifest(file)
+    track_dir = ws.get_track_dir(file)
+    on_disk = any(p.suffix.lower() in {'.wav', '.flac', '.mid', '.midi'}
+                  for p in track_dir.rglob('*') if p.is_file())
+    if not manifest.stems and not manifest.midis and not on_disk:
+        typer.echo(f'No stems or MIDI found for {file} in workspace {track_dir} '
+                   f'(cache root: {ws.cache_root}). Run split/deconstruct with the same --cache-root first.',
+                   err=True)
+        raise typer.Exit(1)
     manifest = ws.get_manifest(file)
     track_dir = ws.get_track_dir(file)
     on_disk = any(p.suffix.lower() in {'.wav', '.flac', '.mid', '.midi'}
@@ -157,6 +187,16 @@ def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(N
     table.add_column('Metric')
     table.add_column('Value')
     table.add_row('Reference comparisons available', str(report.is_objective))
+    table.add_row('Separation mode', report.separation_metrics['mode'])
+    table.add_row('Transcription mode', report.transcription_metrics['mode'])
+    table.add_row('Peak Level (dBFS)', str(report.audio_diagnostics.get('peak_dbfs')))
+    table.add_row('Average reference SDR (dB)', str(report.separation_metrics.get('average_sdr_db')))
+    if report.separation_metrics.get('stem_status'):
+        for stem, status in report.separation_metrics['stem_status'].items():
+            table.add_row(f'Stem status: {stem}', status)
+    table.add_row('Pitched onset+pitch F1', str(report.transcription_metrics.get('pitched', {}).get('onset_pitch_f1')))
+    table.add_row('Total Notes', str(report.transcription_metrics.get('total_notes')))
+    console.print(table)
     table.add_row('Separation mode', report.separation_metrics['mode'])
     table.add_row('Transcription mode', report.transcription_metrics['mode'])
     table.add_row('Peak Level (dBFS)', str(report.audio_diagnostics.get('peak_dbfs')))
