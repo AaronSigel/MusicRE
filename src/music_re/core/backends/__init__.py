@@ -26,6 +26,12 @@ def _ensure_default_structure_analyzers() -> None:
             register_structure_analyzer("librosa", LibrosaStructureAnalyzer)
         except ImportError:
             pass
+    if "beat_this" not in _STRUCTURE_REGISTRY:
+        try:
+            from music_re.core.backends.beat_this_backend import BeatThisStructureAnalyzer
+            register_structure_analyzer("beat_this", BeatThisStructureAnalyzer)
+        except ImportError:
+            pass
     if "allin1" not in _STRUCTURE_REGISTRY:
         try:
             from music_re.core.backends.allin1_backend import AllInOneStructureAnalyzer
@@ -39,6 +45,12 @@ def _ensure_default_transcribers() -> None:
         try:
             from music_re.core.backends.basic_pitch_backend import BasicPitchTranscriber
             register_transcriber_backend("basic_pitch", BasicPitchTranscriber)
+        except ImportError:
+            pass
+    if "adtof" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.adtof_backend import ADTOFDrumTranscriber
+            register_transcriber_backend("adtof", ADTOFDrumTranscriber)
         except ImportError:
             pass
     if "drum_multiband" not in _TRANSCRIBER_REGISTRY:
@@ -127,7 +139,7 @@ def get_transcriber_backend(
     req_name = name.lower()
     if req_name == "auto":
         if mode == "drums":
-            req_name = "drum_multiband"
+            req_name = "adtof" if "adtof" in _TRANSCRIBER_REGISTRY else "drum_multiband"
         else:
             req_name = "basic_pitch"
 

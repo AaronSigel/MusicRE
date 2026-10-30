@@ -45,7 +45,7 @@ def test_transcriber_registry_defaults():
 
     drums = get_transcriber_backend(mode="drums")
     assert drums.mode == "drums"
-    assert drums.backend_name == "drum_multiband"
+    assert drums.backend_name in ("adtof", "drum_multiband")
 
 
 def test_custom_transcriber_registration(tmp_path: Path):
