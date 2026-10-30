@@ -103,6 +103,8 @@ def test_fetch_babyslakh_download_succeeds_lands_at_final_path(tmp_path, monkeyp
         Path(filename).write_bytes(real_archive.read_bytes())
 
     monkeypatch.setattr("scripts.fetch_slakh_subset.urllib.request.urlretrieve", fake_urlretrieve)
+    # The download is size-checked against the real archive; match the fixture.
+    monkeypatch.setattr("scripts.fetch_slakh_subset.BABYSLAKH_SIZE", real_archive.stat().st_size)
 
     tracks = fetch_babyslakh(dest, track_ids=["Track00001"])
 
