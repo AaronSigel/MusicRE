@@ -85,7 +85,7 @@ class DemucsSeparator(SeparatorBackend):
 
         completion_marker = out_d / f".complete_{self.model_name}"
 
-        from demucs.apply import apply_model
+        from demucs_infer.apply import apply_model
         from demucs.audio import AudioFile, save_audio
 
         # Read audio
