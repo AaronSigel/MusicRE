@@ -117,7 +117,7 @@ def test_malicious_member_raises_and_publishes_nothing(tmp_path, extra):
     dest = tmp_path / "dest"
     before_outside = _snapshot(tmp_path)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Refusing"):
         fetch_babyslakh(dest, track_ids=["Track00001", "Track00002"], archive_path=archive)
 
     assert not (dest / "raw" / "Track00001").exists()
@@ -159,7 +159,7 @@ def test_force_with_malicious_archive_keeps_existing_track(tmp_path):
     work.mkdir()
     archive = _build(work, ["Track00001"], extra=_symlink)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Refusing non-regular"):
         fetch_babyslakh(dest, track_ids=["Track00001"], archive_path=archive, force=True)
 
     assert _snapshot(dest / "raw") == before
@@ -247,3 +247,88 @@ def test_missing_track_id_leaves_no_staging(tmp_path):
         fetch_babyslakh(dest, track_ids=["Track00001", "Track00099"], archive_path=archive)
     assert not (dest / "raw" / "Track00001").exists()
     assert _no_staging(dest)
+
+
+def test_force_restore_failure_keeps_old_track_outside_staging(tmp_path, monkeypatch):
+    dest = tmp_path / "dest"
+    raw = dest / "raw"
+    track = raw / "Track00001"
+    track.mkdir(parents=True)
+    (track / "user-data.txt").write_bytes(b"precious")
+    archive = _build(tmp_path, ["Track00001"])
+
+    real_replace = fss.os.replace
+
+    def failing_replace(src, dst):
+        # Moving the old copy aside succeeds; publishing the new copy and
+        # restoring the old one both fail.
+        if Path(dst) == track:
+            raise OSError("simulated replace failure")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(fss.os, "replace", failing_replace)
+    with pytest.raises(OSError) as excinfo:
+        fetch_babyslakh(dest, track_ids=["Track00001"], archive_path=archive, force=True)
+
+    survivors = [p for p in raw.rglob("user-data.txt") if p.read_bytes() == b"precious"]
+    assert len(survivors) == 1
+    assert str(survivors[0].parent) in str(excinfo.value)
+    assert _no_staging(dest)
+
+
+def test_track_id_deeper_than_one_folder_is_ignored(tmp_path):
+    archive = tmp_path / "deep.tar.gz"
+    with tarfile.open(archive, mode="w:gz") as tf:
+        _add_bytes(tf, "a/b/Track00001/mix.wav", b"deep")
+    dest = tmp_path / "dest"
+    with pytest.raises(ValueError, match="Track00001 not found"):
+        fetch_babyslakh(dest, track_ids=["Track00001"], archive_path=archive)
+    assert not (dest / "raw" / "Track00001").exists()
+    assert _no_staging(dest)
+
+
+def test_track_under_two_top_level_folders_is_refused(tmp_path):
+    archive = tmp_path / "two.tar.gz"
+    with tarfile.open(archive, mode="w:gz") as tf:
+        _add_bytes(tf, "a/Track00001/x", b"x")
+        _add_bytes(tf, "b/Track00001/y", b"y")
+    dest = tmp_path / "dest"
+    with pytest.raises(ValueError, match="more than one"):
+        fetch_babyslakh(dest, track_ids=["Track00001"], archive_path=archive)
+    assert not (dest / "raw" / "Track00001").exists()
+    assert _no_staging(dest)
+
+
+@pytest.mark.parametrize("bad_id", ["", ".", "..", "a/b", "a\\b", "/abs", "../Track00001"])
+def test_invalid_track_ids_are_rejected(tmp_path, bad_id):
+    archive = _build(tmp_path, ["Track00001"])
+    dest = tmp_path / "dest"
+    with pytest.raises(ValueError, match="track id"):
+        fetch_babyslakh(dest, track_ids=[bad_id], archive_path=archive)
+    assert not (dest / "raw").exists() or not any((dest / "raw").iterdir())
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_existing_track_path_that_is_a_file_raises(tmp_path, force):
+    dest = tmp_path / "dest"
+    (dest / "raw").mkdir(parents=True)
+    (dest / "raw" / "Track00001").write_bytes(b"user file")
+    archive = _build(tmp_path, ["Track00001"])
+    with pytest.raises(ValueError, match="not a directory"):
+        fetch_babyslakh(dest, track_ids=["Track00001"], archive_path=archive, force=force)
+    assert (dest / "raw" / "Track00001").read_bytes() == b"user file"
+    assert _no_staging(dest)
+
+
+def test_extractall_uses_data_filter(tmp_path, monkeypatch):
+    archive = _build(tmp_path, ["Track00001"])
+    calls = []
+    real = tarfile.TarFile.extractall
+
+    def spy(self, *args, **kwargs):
+        calls.append(kwargs.get("filter"))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", spy)
+    fetch_babyslakh(tmp_path / "dest", track_ids=["Track00001"], archive_path=archive)
+    assert calls == ["data"]

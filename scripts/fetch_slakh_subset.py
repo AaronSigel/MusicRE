@@ -54,16 +54,24 @@ def _select_members(
     member type or name that could escape or alias outside staging.
     """
     selected = []
+    prefixes = set()
     for m in members:
         parts = PurePosixPath(m.name).parts
         if track_id not in parts:
             continue
+        # Safety checks run before the depth filter so an unsafe member
+        # mentioning the track is refused, never silently skipped.
         if not (m.isreg() or m.isdir()):
             raise ValueError(f"Refusing non-regular archive member {m.name!r} (type {m.type!r})")
         if m.name.startswith("/") or PurePosixPath(m.name).is_absolute():
             raise ValueError(f"Refusing absolute archive member {m.name!r}")
         if ".." in parts:
             raise ValueError(f"Refusing archive member with '..': {m.name!r}")
+        if parts.index(track_id) > 1:
+            continue
+        prefixes.add(parts[: parts.index(track_id)])
+        if len(prefixes) > 1:
+            raise ValueError(f"{track_id} appears under more than one folder in {archive_path}")
         rerooted = PurePosixPath(*parts[parts.index(track_id):])
         if ".." in rerooted.parts or rerooted.is_absolute():
             raise ValueError(f"Refusing archive member {m.name!r}")
@@ -91,14 +99,23 @@ def _publish(staging: Path, raw_dir: Path, track_id: str, force: bool) -> None:
         return
     if not force:
         return
-    old_dir = staging / f".old-{track_id}"
+    # Keep the old copy OUTSIDE staging: the staging dir is removed
+    # unconditionally, and the old copy must survive a failed restore.
+    old_dir = Path(tempfile.mkdtemp(dir=raw_dir, prefix=f".old-{track_id}-")) / track_id
     os.replace(final_dir, old_dir)
     try:
         os.replace(new_dir, final_dir)
-    except BaseException:
-        os.replace(old_dir, final_dir)
+    except BaseException as publish_error:
+        try:
+            os.replace(old_dir, final_dir)
+        except BaseException as restore_error:
+            raise OSError(
+                f"Failed to publish {track_id} ({publish_error}) and to restore the "
+                f"previous copy ({restore_error}); it is preserved at {old_dir}"
+            ) from restore_error
+        old_dir.parent.rmdir()
         raise
-    shutil.rmtree(old_dir, ignore_errors=True)
+    shutil.rmtree(old_dir.parent, ignore_errors=True)
 
 
 def fetch_babyslakh(
@@ -114,10 +131,17 @@ def fetch_babyslakh(
     """
     if track_ids is None:
         track_ids = DEFAULT_TRACK_IDS
+    for t in track_ids:
+        if not isinstance(t, str) or t in ("", ".", "..") or "/" in t or "\\" in t or "\x00" in t:
+            raise ValueError(f"Invalid track id {t!r}: must be a single plain path component")
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = dest_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
+    for t in track_ids:
+        p = raw_dir / t
+        if (p.exists() or p.is_symlink()) and (p.is_symlink() or not p.is_dir()):
+            raise ValueError(f"{p} exists but is not a directory; move it away and retry")
 
     if not force and all((raw_dir / t).is_dir() for t in track_ids):
         return sorted(raw_dir / t for t in track_ids)
