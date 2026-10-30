@@ -14,6 +14,8 @@ def build_quantize_grid(
     """Build fine-grained timestamps for quantization using dynamic beats or static metronome."""
     if not isinstance(grid_subdivisions, int) or grid_subdivisions <= 0:
         raise ValueError('grid_subdivisions must be a positive integer')
+    if grid_subdivisions > 64:
+        raise ValueError(f'grid_subdivisions ({grid_subdivisions}) exceeds maximum allowed cap of 64')
     if timeline:
         unique_beats = sorted({float(t) for t in timeline.beats if np.isfinite(t) and t >= 0})
     else:

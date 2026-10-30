@@ -55,12 +55,12 @@ def _peak_rss_mb() -> float:
     return peak / (1024 * 1024 if sys.platform == "darwin" else 1024)
 
 
-def _run_one(mix_path, workspace, ground_truth_stems=None, ground_truth_midi=None):
+def _run_one(mix_path, workspace, ground_truth_stems=None, ground_truth_midi=None, profile="fast", six_stems=False):
     """Time one pipeline+evaluate run; never raises, reports error instead."""
     t0 = time.perf_counter()
     quality_report, error = None, None
     try:
-        run_pipeline(mix_path, workspace=workspace)
+        run_pipeline(mix_path, workspace=workspace, profile=profile, six_stems=six_stems)
         report = evaluate_quality(workspace, mix_path, ground_truth_stems=ground_truth_stems,
                                    ground_truth_midi=ground_truth_midi)
         quality_report = _as_dict(report)
@@ -107,7 +107,7 @@ def prepare_all_tracks(track_dirs: List[Path], prepared_dir: Path):
     return prepared, failures
 
 
-def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path) -> List[dict]:
+def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path, profile: str = "fast", six_stems: bool = False) -> List[dict]:
     results = []
     for track in prepared_tracks:
         track_id = track["track_id"]
@@ -116,6 +116,8 @@ def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path) -> L
             track["mix_path"], ws,
             ground_truth_stems=track["ground_truth_stems_dir"],
             ground_truth_midi=track["ground_truth_midi_path"],
+            profile=profile,
+            six_stems=six_stems,
         )
         results.append(dict(
             track_id=track_id, quality_report=quality_report, wall_time_sec=wall_time_sec,
@@ -128,13 +130,13 @@ def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path) -> L
     return results
 
 
-def run_manual_spotcheck(real_tracks: List[Path], cache_root: Path) -> List[dict]:
+def run_manual_spotcheck(real_tracks: List[Path], cache_root: Path, profile: str = "fast", six_stems: bool = False) -> List[dict]:
     results = []
     for path in real_tracks:
         path = Path(path)
         track_id = path.stem
         ws = WorkspaceManager(cache_root=Path(cache_root) / track_id)
-        quality_report, error, wall_time_sec, peak_ram_mb = _run_one(str(path), ws)
+        quality_report, error, wall_time_sec, peak_ram_mb = _run_one(str(path), ws, profile=profile, six_stems=six_stems)
         results.append(dict(track_id=track_id, quality_report=quality_report, wall_time_sec=wall_time_sec,
                              peak_ram_mb=peak_ram_mb, error=error))
     return results
@@ -156,6 +158,13 @@ def _fmt_drum_class(class_metrics) -> str:
             f"(ref={class_metrics.get('ref_count', '?')}, est={class_metrics.get('est_count', '?')})")
 
 
+def discover_benchmark_tracks(raw_dir: Path) -> list[Path]:
+    """Discover track directories under raw_dir, ignoring hidden/staging entries."""
+    if not raw_dir.is_dir():
+        return []
+    return sorted(d for d in raw_dir.iterdir() if d.is_dir() and not d.name.startswith("."))
+
+
 def render_markdown_report(report: dict) -> str:
     lines = ["# BenchmarkReport", "", f"Git revision: `{report.get('git_revision', 'unknown')}`", ""]
 
@@ -169,9 +178,12 @@ def render_markdown_report(report: dict) -> str:
         trans = qr.get("transcription_metrics") or {}
         by_class = trans.get("drums_by_class") or {}
         false_notes = entry.get("false_notes_on_absent_instrument") or {}
+        avg_sdr = _fmt(sep.get("average_sdr_db"))
+        if sep.get("average_sdr_count") is not None:
+            avg_sdr = f"{avg_sdr} (n={sep.get('average_sdr_count')})"
         row = [
             entry["track_id"],
-            _fmt(sep.get("average_sdr_db")),
+            avg_sdr,
             _fmt((trans.get("pitched") or {}).get("onset_pitch_f1")),
             _fmt((trans.get("drums") or {}).get("onset_pitch_f1")),
             _fmt_drum_class(by_class.get("kick")),
@@ -189,8 +201,18 @@ def render_markdown_report(report: dict) -> str:
               "", "| Track | Stem | SDR (dB) |", "|---|---|---|"]
     for entry in report.get("reference_tracks", []):
         sep = (entry.get("quality_report") or {}).get("separation_metrics") or {}
-        for stem, value in (sep.get("sdr") or {}).items():
-            lines.append(f"| {entry['track_id']} | {stem} | {_fmt(value)} |")
+        stem_statuses = sep.get("stem_status") or {}
+        sdr_dict = sep.get("sdr") or {}
+        all_stems = sorted(set(list(sdr_dict.keys()) + list(stem_statuses.keys())))
+        for stem in all_stems:
+            val = sdr_dict.get(stem)
+            status = stem_statuses.get(stem)
+            display_val = _fmt(val) if val is not None else (status or "-")
+            if stem == "other" and sep.get("other_includes"):
+                display_stem = f"other (includes {', '.join(s for s in sep['other_includes'] if s != 'other')})"
+            else:
+                display_stem = stem
+            lines.append(f"| {entry['track_id']} | {display_stem} | {display_val} |")
 
     lines += ["", "## Reference completeness", "",
               "Only `absent` groups count toward false notes on an absent instrument; "
@@ -229,6 +251,21 @@ def _git_revision() -> str:
         return "unknown"
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    path = Path(path)
+    tmp = tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False)
+    try:
+        with tmp:
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp.name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp.name)
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run the MusicRE Slakh benchmark baseline.")
     parser.add_argument("--slakh-raw-dir", default="data/benchmarks/slakh_raw/raw")
@@ -237,13 +274,15 @@ def main():
     parser.add_argument("--out-json", default="BenchmarkReport.json")
     parser.add_argument("--out-md", default="BenchmarkReport.md")
     parser.add_argument("--history-dir", default="data/benchmarks/history")
+    parser.add_argument("--profile", default="fast", choices=["fast", "balanced", "quality"])
+    parser.add_argument("--six-stems", action="store_true", default=False)
     args = parser.parse_args()
 
     raw_dir = Path(args.slakh_raw_dir)
     prepared_dir = Path(args.prepared_dir)
     prepared_dir.mkdir(parents=True, exist_ok=True)
 
-    track_dirs = sorted(d for d in raw_dir.iterdir() if d.is_dir()) if raw_dir.is_dir() else []
+    track_dirs = discover_benchmark_tracks(raw_dir)
     if not track_dirs:
         track_dirs = fetch_babyslakh(raw_dir.parent)
 
@@ -252,18 +291,20 @@ def main():
     prepared_tracks, prep_failures = prepare_all_tracks(track_dirs, prepared_dir)
 
     cache_root = _fresh_cache_root(Path("data/benchmarks/cache"))
-    reference_results = run_reference_benchmarks(prepared_tracks, cache_root=cache_root) + prep_failures
-    manual_results = run_manual_spotcheck([Path(p) for p in args.real_track], cache_root=cache_root)
+    reference_results = run_reference_benchmarks(prepared_tracks, cache_root=cache_root, profile=args.profile, six_stems=args.six_stems) + prep_failures
+    manual_results = run_manual_spotcheck([Path(p) for p in args.real_track], cache_root=cache_root, profile=args.profile, six_stems=args.six_stems)
 
     report = dict(
         reference_tracks=reference_results,
         manual_spotcheck=manual_results,
         git_revision=_git_revision(),
         generated_at=datetime.now(timezone.utc).isoformat(),
+        profile=args.profile,
+        six_stems=args.six_stems,
     )
 
-    Path(args.out_json).write_text(json.dumps(report, indent=2))
-    Path(args.out_md).write_text(render_markdown_report(report))
+    _atomic_write_text(Path(args.out_json), json.dumps(report, indent=2))
+    _atomic_write_text(Path(args.out_md), render_markdown_report(report))
 
     history_dir = Path(args.history_dir)
     history_dir.mkdir(parents=True, exist_ok=True)

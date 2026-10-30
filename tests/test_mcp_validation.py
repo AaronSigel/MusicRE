@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import time
 from types import SimpleNamespace
 
@@ -65,6 +66,10 @@ def test_cache_root_reaches_workspace_manager(tmp_path, monkeypatch, tool):
     class FakeWS:
         def __init__(self, cache_root=None):
             seen.append(cache_root)
+
+        @contextlib.contextmanager
+        def lock(self, p):
+            yield
 
         def get_manifest(self, p):
             return SimpleNamespace(stems={})

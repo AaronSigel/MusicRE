@@ -1,8 +1,12 @@
+import logging
 from pathlib import Path
 from typing import Dict, Optional, Union
+import numpy as np
 import pretty_midi
 
 from music_re.schemas import MusicalTimeline
+
+logger = logging.getLogger(__name__)
 
 GM_PROGRAM_MAP = {
     "bass": 33,      # Electric Bass (finger)
@@ -27,21 +31,66 @@ def build_combined_midi_project(
     effective_bpm = timeline.bpm if timeline and timeline.bpm > 0 else bpm
     combined_pm = pretty_midi.PrettyMIDI(initial_tempo=effective_bpm)
 
+    # Set up dynamic tempo map from timeline beats if available
+    if timeline and len(timeline.beats) >= 2:
+        unique_beats = sorted({float(t) for t in timeline.beats if t >= 0})
+        if len(unique_beats) >= 2:
+            tick_scales = []
+            current_bpm = effective_bpm
+            current_tick = 0
+            
+            # Initial beat tempo
+            first_interval = unique_beats[1] - unique_beats[0]
+            if first_interval > 0:
+                current_bpm = 60.0 / first_interval
+            tick_scale = 60.0 / (current_bpm * combined_pm.resolution)
+            tick_scales.append((0, tick_scale))
+            
+            # For subsequent beats, add tempo changes at exact ticks
+            for i in range(1, len(unique_beats) - 1):
+                b_prev = unique_beats[i - 1]
+                b_curr = unique_beats[i]
+                b_next = unique_beats[i + 1]
+                interval = b_next - b_curr
+                
+                # Advance tick count by previous beat duration
+                current_tick += int(round(combined_pm.resolution))
+                
+                if interval > 0:
+                    inst_bpm = 60.0 / interval
+                    if abs(inst_bpm - current_bpm) > 0.5:
+                        current_bpm = inst_bpm
+                        tick_scale = 60.0 / (current_bpm * combined_pm.resolution)
+                        tick_scales.append((current_tick, tick_scale))
+
+            combined_pm._tick_scales = tick_scales
+            max_tick = current_tick + int(round(combined_pm.resolution * 100))
+            combined_pm._update_tick_to_time(max_tick)
+
+    # Time signature from timeline downbeats if available
+    if timeline and len(timeline.downbeats) >= 2 and len(timeline.beats) >= 2:
+        # Estimate numerator as average beats per downbeat
+        beats_in_bar = round((timeline.downbeats[1] - timeline.downbeats[0]) / max(1e-4, np.mean(np.diff(timeline.beats))))
+        num = max(1, min(16, int(beats_in_bar)))
+        combined_pm.time_signature_changes = [pretty_midi.TimeSignature(numerator=num, denominator=4, time=0.0)]
+    else:
+        combined_pm.time_signature_changes = [pretty_midi.TimeSignature(numerator=4, denominator=4, time=0.0)]
+
     for stem_name, stem_path in stem_midis.items():
         stem_p = Path(stem_path).resolve()
         if not stem_p.is_file():
-            continue
+            raise ValueError(f"Missing stem MIDI file for '{stem_name}': {stem_p}")
 
         try:
             stem_pm = pretty_midi.PrettyMIDI(str(stem_p), initial_tempo=effective_bpm)
-        except Exception:
-            continue
+        except Exception as e:
+            raise ValueError(f"Corrupt or unreadable MIDI file for '{stem_name}' at {stem_p}: {e}") from e
 
         s_key = stem_name.lower()
         is_drum = s_key in ("drums", "percussion")
         program = GM_PROGRAM_MAP.get(s_key, 0)
 
-        # Merge all notes from this stem's instruments into one designated track
+        # Merge all notes, pitch bends, control changes from this stem's instruments into one designated track
         stem_instrument = pretty_midi.Instrument(
             program=program,
             is_drum=is_drum,
@@ -58,8 +107,18 @@ def build_combined_midi_project(
                         end=note.end,
                     )
                 )
+            for pb in src_inst.pitch_bends:
+                stem_instrument.pitch_bends.append(
+                    pretty_midi.PitchBend(pitch=pb.pitch, time=pb.time)
+                )
+            for cc in src_inst.control_changes:
+                stem_instrument.control_changes.append(
+                    pretty_midi.ControlChange(number=cc.number, value=cc.value, time=cc.time)
+                )
 
         stem_instrument.notes.sort(key=lambda n: (n.start, n.pitch))
+        stem_instrument.pitch_bends.sort(key=lambda pb: pb.time)
+        stem_instrument.control_changes.sort(key=lambda cc: cc.time)
         combined_pm.instruments.append(stem_instrument)
 
     combined_pm.write(str(out_p))

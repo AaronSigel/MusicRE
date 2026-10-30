@@ -11,11 +11,13 @@ import soundfile as sf
 
 def normalize_audio(data: np.ndarray, target_peak_db: float = -1.0) -> np.ndarray:
     """Normalize audio array to a target peak dBFS without changing time/phase."""
+    if not np.all(np.isfinite(data)):
+        raise ValueError("Audio data contains NaN or Inf values")
     if data.size == 0:
         return data.astype(np.float32)
     target_amplitude = 10.0 ** (target_peak_db / 20.0)
     current_peak = float(np.max(np.abs(data)))
-    if current_peak == 0.0 or np.isnan(current_peak):
+    if current_peak == 0.0:
         return data.astype(np.float32)
     scale = target_amplitude / current_peak
     return (data * scale).astype(np.float32)
@@ -64,6 +66,11 @@ def decode_audio(
     """Decode audio via FFmpeg to a numpy float32 array, with optional peak normalization."""
     with decode_to_temp_wav(input_path, target_sr=target_sr) as temp_wav:
         data, sr = sf.read(str(temp_wav), dtype="float32")
+
+    if not np.all(np.isfinite(data)):
+        raise ValueError(f"Audio file {input_path} contains NaN or Inf values")
+    if data.size == 0:
+        raise ValueError(f"Audio file {input_path} is empty or zero-length")
 
     if normalize_db is not None:
         data = normalize_audio(data, target_peak_db=normalize_db)

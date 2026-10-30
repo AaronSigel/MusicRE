@@ -20,22 +20,25 @@ def mock_audio_workspace(tmp_path: Path):
     sf.write(str(track_wav), y, sr)
 
     stems_dir = ws.get_stems_dir(track_wav, model_name="htdemucs")
+    stems_dict = {}
     for s in ["vocals", "drums", "bass", "other"]:
-        sf.write(str(stems_dir / f"{s}.wav"), y * 0.25, sr)
+        p = stems_dir / f"{s}.wav"
+        sf.write(str(p), y * 0.25, sr)
+        stems_dict[s] = str(p)
     (stems_dir / ".complete_htdemucs").write_text("ok")
+    ws.mark_stage_complete(track_wav, "separation", artifacts=stems_dict)
 
     return ws, track_wav
 
 def test_cli_evaluate_command(mock_audio_workspace):
     ws, track_wav = mock_audio_workspace
-    with patch("music_re.cli.WorkspaceManager", return_value=ws):
-        res = runner.invoke(app, ["evaluate", str(track_wav)])
-        assert res.exit_code == 0
-        assert "Quality Evaluation" in res.stdout
+    res = runner.invoke(app, ["evaluate", str(track_wav), "--cache-root", str(ws.cache_root)])
+    assert res.exit_code == 0
+    assert "Quality Evaluation" in res.stdout
 
-        res_json = runner.invoke(app, ["evaluate", str(track_wav), "--json"])
-        assert res_json.exit_code == 0
-        assert '"is_objective"' in res_json.stdout
+    res_json = runner.invoke(app, ["evaluate", str(track_wav), "--cache-root", str(ws.cache_root), "--json"])
+    assert res_json.exit_code == 0
+    assert '"is_objective"' in res_json.stdout
 
 def test_cli_export_command(tmp_path: Path, complete_workspace):
     ws, track_wav = complete_workspace
