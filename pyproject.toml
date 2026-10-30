@@ -27,6 +27,8 @@ dependencies = [
     "all-in-one-infer==3.1.0",
     "mir-eval==0.8.2",
     "museval==0.4.1",
+    "beat-this>=1.1.0",
+    "adtof-pytorch",
 ]
 
 [project.optional-dependencies]
@@ -44,3 +46,6 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 markers = ["models: downloads or loads external model weights", "real_e2e: opt-in acceptance on a real MP3", "dataset: downloads or loads external benchmark datasets (Slakh)"]
+
+[tool.uv.sources]
+adtof-pytorch = { git = "https://github.com/xavriley/ADTOF-pytorch", rev = "85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9" }
