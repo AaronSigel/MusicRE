@@ -127,6 +127,23 @@ def test_drum_class_breakdown_counts_other_gm_kit_pitches_in_each_class(tmp_path
     assert metrics['drums_by_class']['kick']['f1'] == 1.0
 
 
+def test_drum_class_f1_scores_gm_aliases_correctly(tmp_path):
+    reference, estimate = tmp_path / 'ref_aliases.mid', tmp_path / 'est_aliases.mid'
+    write_drum_note(reference, pitch=35, start=0.0)
+    write_drum_note(reference, pitch=37, start=1.0, append_to=reference)
+    write_drum_note(reference, pitch=44, start=2.0, append_to=reference)
+
+    write_drum_note(estimate, pitch=36, start=0.0)
+    write_drum_note(estimate, pitch=38, start=1.0, append_to=estimate)
+    write_drum_note(estimate, pitch=42, start=2.0, append_to=estimate)
+
+    metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
+
+    assert metrics['drums_by_class']['kick']['f1'] == 1.0
+    assert metrics['drums_by_class']['snare']['f1'] == 1.0
+    assert metrics['drums_by_class']['hihat']['f1'] == 1.0
+
+
 def test_silent_reference_is_unavailable(quality_workspace, tmp_path):
     ws, audio = quality_workspace
     gt = tmp_path / 'gt'

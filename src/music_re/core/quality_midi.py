@@ -15,6 +15,7 @@ DRUM_GM_PITCH_CLASSES = {
     'snare': {37, 38, 40},
     'hihat': {42, 44, 46},
 }
+CANONICAL_DRUM_PITCHES = {'kick': 36, 'snare': 38, 'hihat': 42}
 
 
 def _notes(pm, drums):
@@ -77,8 +78,15 @@ def transcription_quality(midis, ground_truth=None):
             if drums:
                 by_class = {}
                 for name, pitches in DRUM_GM_PITCH_CLASSES.items():
-                    ref_class = [n for n in ref_notes if n.pitch in pitches]
-                    est_class = [n for n in est_notes if n.pitch in pitches]
+                    canon_pitch = CANONICAL_DRUM_PITCHES[name]
+                    ref_class = [
+                        pretty_midi.Note(velocity=n.velocity, pitch=canon_pitch, start=n.start, end=n.end)
+                        for n in ref_notes if n.pitch in pitches
+                    ]
+                    est_class = [
+                        pretty_midi.Note(velocity=n.velocity, pitch=canon_pitch, start=n.start, end=n.end)
+                        for n in est_notes if n.pitch in pitches
+                    ]
                     if not ref_class and not est_class:
                         continue
                     by_class[name] = {**_score(ref_class, est_class, offsets=False),
