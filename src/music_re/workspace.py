@@ -1,7 +1,12 @@
+import contextlib
+import fcntl
 import hashlib
 import json
+import os
+import tempfile
+import threading
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Iterator, Optional, Union
 
 from music_re.schemas import MusicalTimeline, QualityReport, WorkspaceManifest
 
@@ -28,6 +33,29 @@ def compute_file_hash(path: Union[str, Path]) -> str:
     return compute_file_content_hash(path)
 
 
+def _atomic_write_json(path: Path, data: Any) -> Path:
+    """Write JSON via a unique sibling temp file, fsync, then atomically replace."""
+    path = Path(path)
+    tmp = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+    )
+    try:
+        with tmp:
+            json.dump(data, tmp, indent=2, ensure_ascii=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp.name, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp.name)
+        raise
+    return path
+
+
+# Per-thread nesting state: {lock_path: [pid, depth, fd]}.
+_held_locks = threading.local()
+
+
 class WorkspaceManager:
     """Manages cache workspace directories indexed by content hash."""
 
@@ -37,6 +65,33 @@ class WorkspaceManager:
         else:
             self.cache_root = Path(cache_root).resolve()
         self.cache_root.mkdir(parents=True, exist_ok=True)
+
+    @contextlib.contextmanager
+    def lock(self, file_path: Union[str, Path]) -> Iterator[None]:
+        """Exclusive inter-process lock on the track workspace; re-entrant per thread."""
+        lock_path = str(self.get_track_dir(file_path) / ".lock")
+        held = getattr(_held_locks, "held", None)
+        if held is None:
+            held = _held_locks.held = {}
+        entry = held.get(lock_path)
+        if entry is not None and entry[0] == os.getpid():
+            entry[1] += 1
+            try:
+                yield
+            finally:
+                entry[1] -= 1
+            return
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            held[lock_path] = [os.getpid(), 1, fd]
+            try:
+                yield
+            finally:
+                del held[lock_path]
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
     def get_track_dir(self, file_path: Union[str, Path]) -> Path:
         p = Path(file_path).resolve()
@@ -66,22 +121,16 @@ class WorkspaceManager:
 
     def save_metadata(self, file_path: Union[str, Path], metadata: Dict[str, Any]) -> Path:
         meta_file = self.get_track_dir(file_path) / "metadata.json"
-        tmp_file = meta_file.with_suffix(".tmp")
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        tmp_file.replace(meta_file)
-        return meta_file
+        return _atomic_write_json(meta_file, metadata)
 
     def get_timeline_path(self, file_path: Union[str, Path]) -> Path:
         return self.get_track_dir(file_path) / "timeline.json"
 
     def save_timeline(self, file_path: Union[str, Path], timeline: MusicalTimeline) -> Path:
         tl_path = self.get_timeline_path(file_path)
-        tmp_file = tl_path.with_suffix(".tmp")
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(timeline.model_dump(), f, indent=2, ensure_ascii=False)
-        tmp_file.replace(tl_path)
-        self.mark_stage_complete(file_path, "structure", artifacts={"timeline": timeline.model_dump()})
+        with self.lock(file_path):
+            _atomic_write_json(tl_path, timeline.model_dump())
+            self.mark_stage_complete(file_path, "structure", artifacts={"timeline": timeline.model_dump()})
         return tl_path
 
     def load_timeline(self, file_path: Union[str, Path]) -> Optional[MusicalTimeline]:
@@ -99,11 +148,13 @@ class WorkspaceManager:
 
     def save_quality_report(self, file_path: Union[str, Path], report: QualityReport) -> Path:
         qr_path = self.get_quality_report_path(file_path)
-        tmp_file = qr_path.with_suffix(".tmp")
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(report.model_dump(), f, indent=2, ensure_ascii=False)
-        tmp_file.replace(qr_path)
-        self.mark_stage_complete(file_path, "evaluation", artifacts={"report": report.model_dump()})
+        with self.lock(file_path):
+            _atomic_write_json(qr_path, report.model_dump())
+            manifest = self.mark_stage_complete(file_path, "evaluation", artifacts={"report": report.model_dump()})
+            # Same shape as music_re.core.pipeline._hashes, so export validation
+            # still passes after a standalone re-evaluation.
+            manifest.artifact_hashes["evaluation"] = {str(qr_path): compute_file_content_hash(qr_path)}
+            self.save_manifest(file_path, manifest)
         return qr_path
 
     def load_quality_report(self, file_path: Union[str, Path]) -> Optional[QualityReport]:
@@ -133,31 +184,32 @@ class WorkspaceManager:
                 data = json.load(f)
             return WorkspaceManifest(**data)
 
-        p = Path(file_path).resolve()
-        content_hash = compute_file_content_hash(p)
-        manifest = WorkspaceManifest(
-            track_id=content_hash,
-            input_file=str(p),
-            status="pending",
-        )
-        self.save_manifest(file_path, manifest)
-        return manifest
+        with self.lock(file_path):
+            # Another process may have created it while we waited.
+            if m_path.exists():
+                with open(m_path, "r", encoding="utf-8") as f:
+                    return WorkspaceManifest(**json.load(f))
+            p = Path(file_path).resolve()
+            content_hash = compute_file_content_hash(p)
+            manifest = WorkspaceManifest(
+                track_id=content_hash,
+                input_file=str(p),
+                status="pending",
+            )
+            self.save_manifest(file_path, manifest)
+            return manifest
 
     def save_manifest(self, file_path: Union[str, Path], manifest: WorkspaceManifest) -> Path:
-        m_path = self.get_manifest_path(file_path)
-        tmp_file = m_path.with_suffix(".tmp")
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(manifest.model_dump(), f, indent=2, ensure_ascii=False)
-        tmp_file.replace(m_path)
-        return m_path
+        return _atomic_write_json(self.get_manifest_path(file_path), manifest.model_dump())
 
     def update_manifest(self, file_path: Union[str, Path], **kwargs) -> WorkspaceManifest:
-        manifest = self.get_manifest(file_path)
-        for k, v in kwargs.items():
-            if hasattr(manifest, k):
-                setattr(manifest, k, v)
-        self.save_manifest(file_path, manifest)
-        return manifest
+        with self.lock(file_path):
+            manifest = self.get_manifest(file_path)
+            for k, v in kwargs.items():
+                if hasattr(manifest, k):
+                    setattr(manifest, k, v)
+            self.save_manifest(file_path, manifest)
+            return manifest
 
     def mark_stage_complete(
         self,
@@ -165,51 +217,53 @@ class WorkspaceManager:
         stage: str,
         artifacts: Optional[Dict[str, Any]] = None,
     ) -> WorkspaceManifest:
-        manifest = self.get_manifest(file_path)
-        if artifacts is not None:
-            if stage == "separation":
-                if manifest.stems != artifacts:
-                    manifest = self.invalidate_stages(file_path, ['analysis', 'structure', 'transcription', 'evaluation'])
-                manifest.stems = dict(artifacts)
-            elif stage == "analysis":
-                manifest.analysis = artifacts
-            elif stage == "structure":
-                if manifest.timeline != artifacts.get('timeline', artifacts):
-                    manifest = self.invalidate_stages(file_path, ['transcription', 'evaluation'])
-                manifest.timeline = artifacts.get("timeline", artifacts)
-            elif stage == "evaluation":
-                manifest.evaluation = artifacts
-            elif stage == "transcription":
-                manifest.midis = dict(artifacts)
-        if stage not in manifest.completed_stages:
-            manifest.completed_stages.append(stage)
-        if stage in manifest.stage_errors:
-            del manifest.stage_errors[stage]
-        self.save_manifest(file_path, manifest)
-        return manifest
+        with self.lock(file_path):
+            manifest = self.get_manifest(file_path)
+            if artifacts is not None:
+                if stage == "separation":
+                    if manifest.stems != artifacts:
+                        manifest = self.invalidate_stages(file_path, ['analysis', 'structure', 'transcription', 'evaluation'])
+                    manifest.stems = dict(artifacts)
+                elif stage == "analysis":
+                    manifest.analysis = artifacts
+                elif stage == "structure":
+                    if manifest.timeline != artifacts.get('timeline', artifacts):
+                        manifest = self.invalidate_stages(file_path, ['transcription', 'evaluation'])
+                    manifest.timeline = artifacts.get("timeline", artifacts)
+                elif stage == "evaluation":
+                    manifest.evaluation = artifacts
+                elif stage == "transcription":
+                    manifest.midis = dict(artifacts)
+            if stage not in manifest.completed_stages:
+                manifest.completed_stages.append(stage)
+            if stage in manifest.stage_errors:
+                del manifest.stage_errors[stage]
+            self.save_manifest(file_path, manifest)
+            return manifest
 
     def invalidate_stages(self, file_path: Union[str, Path], stages) -> WorkspaceManifest:
         """Invalidate active state without deleting user or historical artifacts."""
-        manifest = self.get_manifest(file_path)
-        for stage in stages:
-            manifest.completed_stages = [s for s in manifest.completed_stages if s != stage]
-            manifest.stage_fingerprints.pop(stage, None)
-            manifest.artifact_hashes.pop(stage, None)
-            manifest.stage_errors.pop(stage, None)
-            if stage == 'separation':
-                manifest.stems = {}
-            elif stage == 'analysis':
-                manifest.analysis = None
-            elif stage == 'structure':
-                manifest.timeline = None
-            elif stage == 'transcription':
-                manifest.midis = {}
-                manifest.transcription_results = {}
-            elif stage == 'evaluation':
-                manifest.evaluation = None
-        manifest.status = 'pending'
-        self.save_manifest(file_path, manifest)
-        return manifest
+        with self.lock(file_path):
+            manifest = self.get_manifest(file_path)
+            for stage in stages:
+                manifest.completed_stages = [s for s in manifest.completed_stages if s != stage]
+                manifest.stage_fingerprints.pop(stage, None)
+                manifest.artifact_hashes.pop(stage, None)
+                manifest.stage_errors.pop(stage, None)
+                if stage == 'separation':
+                    manifest.stems = {}
+                elif stage == 'analysis':
+                    manifest.analysis = None
+                elif stage == 'structure':
+                    manifest.timeline = None
+                elif stage == 'transcription':
+                    manifest.midis = {}
+                    manifest.transcription_results = {}
+                elif stage == 'evaluation':
+                    manifest.evaluation = None
+            manifest.status = 'pending'
+            self.save_manifest(file_path, manifest)
+            return manifest
 
     def record_stage_error(
         self,
@@ -217,9 +271,10 @@ class WorkspaceManager:
         stage: str,
         error_message: str,
     ) -> WorkspaceManifest:
-        manifest = self.get_manifest(file_path)
-        manifest.status = "failed"
-        manifest.current_stage = stage
-        manifest.stage_errors[stage] = error_message
-        self.save_manifest(file_path, manifest)
-        return manifest
+        with self.lock(file_path):
+            manifest = self.get_manifest(file_path)
+            manifest.status = "failed"
+            manifest.current_stage = stage
+            manifest.stage_errors[stage] = error_message
+            self.save_manifest(file_path, manifest)
+            return manifest
