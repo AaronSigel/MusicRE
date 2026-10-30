@@ -65,6 +65,10 @@ class CrepeVocalTranscriber(TranscriberBackend):
             )
             pm = pretty_midi.PrettyMIDI(str(tmp_midi), initial_tempo=effective_bpm)
 
+        if not pm.instruments:
+            # Ensure instrument exists so pitch bends can attach
+            pm.instruments.append(pretty_midi.Instrument(program=54, is_drum=False, name="Vocals"))
+
         audio, sr = decode_audio(in_p, target_sr=16000, normalize_db=None)
         if audio.ndim > 1:
             audio = np.mean(audio, axis=-1)
