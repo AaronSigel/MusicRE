@@ -233,3 +233,36 @@ def test_cli_export_dawproject_flag(daw_workspace, tmp_path: Path):
     )
     assert res.exit_code == 0, res.output
     assert (target / f"{source.stem}.dawproject").is_file()
+
+
+def test_export_dawproject_markers_chronological_sort(daw_workspace, tmp_path: Path):
+    ws, source = daw_workspace
+    timeline = ws.load_timeline(source)
+    from music_re.schemas import BarChord
+    # Interleave chords and sections chronologically
+    timeline.sections = [
+        TimelineSection(label="intro", start_sec=0.0, end_sec=1.0),
+        TimelineSection(label="chorus", start_sec=2.0, end_sec=3.0),
+    ]
+    timeline.chords = [
+        BarChord(bar=1, start_sec=0.5, end_sec=1.0, chord="C", confidence=0.9),
+        BarChord(bar=2, start_sec=1.5, end_sec=2.0, chord="G", confidence=0.85),
+    ]
+    ws.save_timeline(source, timeline)
+
+    out_file = tmp_path / "interleaved_markers.dawproject"
+    export_dawproject(ws, source, out_file)
+
+    project = DawProject.load_project(str(out_file))
+    marker_times = [m.time for m in project.arrangement.markers.markers]
+    assert marker_times == sorted(marker_times)
+    assert [m.name for m in project.arrangement.markers.markers] == ["intro", "C", "G", "chorus"]
+
+
+def test_export_bundle_direct_dawproject_target_exists(daw_workspace, tmp_path: Path):
+    ws, source = daw_workspace
+    target = tmp_path / "overwrite.dawproject"
+    target.write_bytes(b"prior existing content")
+
+    with pytest.raises(ValueError, match="Target already exists"):
+        export_bundle(ws, source, target, export_dawproject=True)

@@ -109,7 +109,7 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
         if is_direct_daw:
             staged_daw = Path(temp) / actual.name
             generate_dawproject(workspace, source, staged_daw)
-            os.link(staged_daw, actual)
+            os.replace(staged_daw, actual)
             return actual
         staged = Path(temp) / 'bundle'
         staged.mkdir()

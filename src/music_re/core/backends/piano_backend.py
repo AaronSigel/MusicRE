@@ -1,6 +1,7 @@
 import copy
 from pathlib import Path
 from typing import Optional, Union
+import numpy as np
 import pretty_midi
 import torch
 
@@ -48,6 +49,8 @@ class ByteDancePianoTranscriber(TranscriberBackend):
             effective_bpm = 120.0
 
         audio, _ = decode_audio(in_p, target_sr=16000, normalize_db=None)
+        if audio.ndim > 1:
+            audio = np.mean(audio, axis=-1)
 
         model = self._get_model()
         model.transcribe(audio, str(out_p))

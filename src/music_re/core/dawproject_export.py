@@ -161,6 +161,7 @@ def export_dawproject(
                 marker_list.append(Marker(time=float(c_time), name=str(c_chord)))
                 prev_chord = c_chord
 
+    marker_list.sort(key=lambda m: m.time)
     markers = Markers(markers=marker_list) if marker_list else None
 
     # 4. Transport tempo & time signature

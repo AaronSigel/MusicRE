@@ -58,3 +58,12 @@ def test_adtof_drum_transcriber_on_synthetic_audio(tmp_path):
     assert Path(res.midi_path).is_file()
     assert Path(res.raw_midi_path).is_file()
     assert res.note_count >= 0
+
+
+def test_adtof_empty_activation_guard():
+    from music_re.core.backends.adtof_backend import _pick_peaks_with_strength, DEFAULT_THRESHOLDS
+    empty_act = np.zeros((0, 5), dtype=np.float32)
+    peaks = _pick_peaks_with_strength(empty_act, DEFAULT_THRESHOLDS)
+    assert isinstance(peaks, dict)
+    for class_name, peak_list in peaks.items():
+        assert peak_list == []

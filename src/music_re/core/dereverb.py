@@ -129,11 +129,15 @@ def suppress_reverb_and_tails(
 
         # Align gain frames with STFT frames
         n_frames = mag.shape[1]
-        g_frames = np.interp(
-            np.arange(n_frames),
-            np.arange(len(gain_smooth)),
-            gain_smooth,
-        )
+        n_gain = len(gain_smooth)
+        if n_frames == n_gain:
+            g_frames = gain_smooth
+        else:
+            g_frames = np.interp(
+                np.linspace(0.0, 1.0, n_frames),
+                np.linspace(0.0, 1.0, n_gain),
+                gain_smooth,
+            )
         g_broad = g_frames[np.newaxis, :]
 
         # In tail regions where broadband gain drops, diffuse reverb floor is attenuated,

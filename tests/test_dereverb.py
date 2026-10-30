@@ -175,3 +175,12 @@ def test_basic_pitch_dereverb_integration(tmp_path: Path):
         )
     assert len(captured_paths) == 1
     assert captured_paths[0] == str(audio_wav.resolve())
+
+
+def test_dereverb_nonstandard_sample_count():
+    # Test unusual length to verify normalized frame interpolation
+    sr = 22050
+    audio = np.random.randn(12345).astype(np.float32) * 0.1
+    cleaned = suppress_reverb_and_tails(audio, sr=sr)
+    assert cleaned.shape == audio.shape
+    assert np.all(np.isfinite(cleaned))

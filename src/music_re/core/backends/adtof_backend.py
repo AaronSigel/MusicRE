@@ -38,6 +38,9 @@ def _pick_peaks_with_strength(
 
     for i, name in enumerate(ADTOF_CLASSES):
         x = np.asarray(act[:, i], dtype=np.float32)
+        if x.size == 0:
+            out[name] = []
+            continue
         if pre_avg_n or post_avg_n:
             k = np.ones(pre_avg_n + 1 + post_avg_n, dtype=np.float32)
             k /= k.size

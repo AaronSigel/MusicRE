@@ -204,6 +204,9 @@ class SCNetSeparator(SeparatorBackend):
                 or checkpoint
             )
             model.load_state_dict(state_dict, strict=False)
+        else:
+            import warnings
+            warnings.warn("SCNet initialized without checkpoint; running with uninitialized weights.", UserWarning)
 
         model.to(self.device)
         model.eval()

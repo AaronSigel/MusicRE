@@ -178,15 +178,6 @@ def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(N
                    f'(cache root: {ws.cache_root}). Run split/deconstruct with the same --cache-root first.',
                    err=True)
         raise typer.Exit(1)
-    manifest = ws.get_manifest(file)
-    track_dir = ws.get_track_dir(file)
-    on_disk = any(p.suffix.lower() in {'.wav', '.flac', '.mid', '.midi'}
-                  for p in track_dir.rglob('*') if p.is_file())
-    if not manifest.stems and not manifest.midis and not on_disk:
-        typer.echo(f'No stems or MIDI found for {file} in workspace {track_dir} '
-                   f'(cache root: {ws.cache_root}). Run split/deconstruct with the same --cache-root first.',
-                   err=True)
-        raise typer.Exit(1)
     report = evaluate_quality(ws, file, ground_truth_stems, ground_truth_midi)
     ws.save_quality_report(file, report)
     if as_json:
@@ -203,13 +194,6 @@ def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(N
     if report.separation_metrics.get('stem_status'):
         for stem, status in report.separation_metrics['stem_status'].items():
             table.add_row(f'Stem status: {stem}', status)
-    table.add_row('Pitched onset+pitch F1', str(report.transcription_metrics.get('pitched', {}).get('onset_pitch_f1')))
-    table.add_row('Total Notes', str(report.transcription_metrics.get('total_notes')))
-    console.print(table)
-    table.add_row('Separation mode', report.separation_metrics['mode'])
-    table.add_row('Transcription mode', report.transcription_metrics['mode'])
-    table.add_row('Peak Level (dBFS)', str(report.audio_diagnostics.get('peak_dbfs')))
-    table.add_row('Average reference SDR (dB)', str(report.separation_metrics.get('average_sdr_db')))
     table.add_row('Pitched onset+pitch F1', str(report.transcription_metrics.get('pitched', {}).get('onset_pitch_f1')))
     table.add_row('Total Notes', str(report.transcription_metrics.get('total_notes')))
     console.print(table)

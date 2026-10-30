@@ -89,3 +89,27 @@ def test_bytedance_piano_transcribe_file_not_found(tmp_path: Path):
             audio_path=tmp_path / "nonexistent.wav",
             output_midi_path=tmp_path / "out.mid",
         )
+
+
+def test_bytedance_piano_stereo_downmix(tmp_path: Path):
+    sr = 16000
+    stereo_data = np.stack([np.sin(np.linspace(0, 10, sr)), np.cos(np.linspace(0, 10, sr))], axis=1).astype(np.float32)
+    stereo_path = tmp_path / "stereo.wav"
+    sf.write(stereo_path, stereo_data, sr)
+
+    passed_audio = []
+
+    def mock_transcribe(audio, midi_path):
+        passed_audio.append(audio)
+        pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
+        pm.write(str(midi_path))
+
+    mock_model = MagicMock()
+    mock_model.transcribe.side_effect = mock_transcribe
+
+    transcriber = ByteDancePianoTranscriber(device="cpu")
+    with patch.object(transcriber, "_get_model", return_value=mock_model):
+        transcriber.transcribe(stereo_path, tmp_path / "out.mid")
+
+    assert len(passed_audio) == 1
+    assert passed_audio[0].ndim == 1
