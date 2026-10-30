@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Optional, Tuple, Union
 import librosa
@@ -7,6 +8,8 @@ import soundfile as sf
 
 from music_re.core.audio_io import decode_audio
 from music_re.schemas import TrackAnalysis
+
+logger = logging.getLogger(__name__)
 
 # Pitch class names
 PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -18,6 +21,9 @@ MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 
 
 def estimate_key(y: np.ndarray, sr: int) -> Tuple[str, float]:
     """Estimate musical key using Krumhansl-Schmuckler chroma correlation."""
+    if float(np.max(np.abs(y))) == 0.0:
+        return "N/A", 0.0
+
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_avg = np.mean(chroma, axis=1)
 
@@ -25,7 +31,7 @@ def estimate_key(y: np.ndarray, sr: int) -> Tuple[str, float]:
     if np.sum(chroma_avg) > 0:
         chroma_norm = chroma_avg / np.sum(chroma_avg)
     else:
-        return "C major", 0.0
+        return "N/A", 0.0
 
     best_key = "C major"
     best_corr = -1.0
@@ -48,6 +54,8 @@ def estimate_key(y: np.ndarray, sr: int) -> Tuple[str, float]:
             best_key = f"{root} minor"
 
     confidence = max(0.0, min(1.0, (best_corr + 1.0) / 2.0))
+    if confidence == 0.0:
+        return "N/A", 0.0
     return best_key, round(confidence, 3)
 
 
@@ -56,7 +64,8 @@ def measure_lufs(y: np.ndarray, sr: int) -> float:
     # Ensure minimum length for pyloudnorm (block size requires ~400ms)
     min_len = int(sr * 0.45)
     if len(y) < min_len:
-        y = np.pad(y, (0, min_len - len(y)))
+        pad_shape = [(0, min_len - len(y))] + ([(0, 0)] if y.ndim > 1 else [])
+        y = np.pad(y, pad_shape)
 
     meter = pyln.Meter(sr)
     try:
@@ -76,9 +85,18 @@ def analyze_audio(file_path: Union[str, Path], stem_name: Optional[str] = None) 
 
     target_sr = 22050
     # Unified FFmpeg decoding to avoid audioread deprecation warnings
-    y, sr = decode_audio(p, target_sr=target_sr, normalize_db=None)
-    if y.ndim > 1:
-        y = np.mean(y, axis=1)
+    orig_y, sr = decode_audio(p, target_sr=target_sr, normalize_db=None)
+
+    # Check phase cancellation for stereo
+    if orig_y.ndim > 1 and orig_y.shape[1] > 1:
+        mono_y = np.mean(orig_y, axis=1)
+        orig_rms = np.sqrt(np.mean(orig_y ** 2))
+        mono_rms = np.sqrt(np.mean(mono_y ** 2))
+        if orig_rms > 1e-5 and mono_rms < 0.01 * orig_rms:
+            logger.warning(f"Stereo channels for {p} largely cancel out in mono downmix.")
+        y = mono_y
+    else:
+        y = orig_y.squeeze()
 
     duration_sec = round(float(len(y) / sr), 2)
 
@@ -98,8 +116,8 @@ def analyze_audio(file_path: Union[str, Path], stem_name: Optional[str] = None) 
     else:
         key, confidence = estimate_key(y, sr)
 
-    # LUFS calculation
-    lufs = measure_lufs(y, sr)
+    # LUFS calculation using original stereo/multichannel audio
+    lufs = measure_lufs(orig_y, sr)
 
     return TrackAnalysis(
         file_path=str(p),
