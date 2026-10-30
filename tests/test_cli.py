@@ -51,3 +51,40 @@ def test_cli_to_midi_refuses_overwriting_input_audio(tmp_path: Path):
     assert result.exit_code != 0
     assert in_wav.read_bytes() == original
     assert in_wav.read_bytes().startswith(b"RIFF")
+
+
+def test_cli_to_midi_refuses_hardlink_of_input_audio(tmp_path: Path):
+    import os
+    sr = 22050
+    in_wav = tmp_path / "drums.wav"
+    sf.write(str(in_wav), np.zeros(sr), sr)
+    original = in_wav.read_bytes()
+    link = tmp_path / "hard.mid"
+    os.link(in_wav, link)
+
+    result = runner.invoke(app, ["to-midi", str(in_wav), "--mode", "drums", "--out", str(link)])
+    assert result.exit_code == 2
+    assert "cannot overwrite the input audio file" in result.output
+    assert in_wav.read_bytes() == original
+
+
+def test_cli_to_midi_refuses_default_output_equal_to_mid_input(tmp_path: Path):
+    in_file = tmp_path / "stem.mid"
+    in_file.write_bytes(b"RIFF-not-really-midi")
+
+    result = runner.invoke(app, ["to-midi", str(in_file), "--mode", "drums"])
+    assert result.exit_code == 2
+    assert "cannot overwrite the input audio file" in result.output
+    assert not isinstance(result.exception, ValueError)
+    assert in_file.read_bytes() == b"RIFF-not-really-midi"
+
+
+def test_cli_to_midi_refuses_raw_output_aliasing_input(tmp_path: Path):
+    sr = 22050
+    in_wav = tmp_path / "foo_raw.wav"
+    sf.write(str(in_wav), np.zeros(sr), sr)
+    original = in_wav.read_bytes()
+
+    result = runner.invoke(app, ["to-midi", str(in_wav), "--mode", "drums", "--out", str(tmp_path / "foo.wav")])
+    assert result.exit_code == 2
+    assert in_wav.read_bytes() == original

@@ -90,3 +90,48 @@ def test_transcribe_refuses_overwriting_input_audio_file(tmp_path: Path):
         DrumTranscriber().transcribe(wav, link)
     assert wav.read_bytes() == original
     assert link.is_symlink()
+
+
+def test_transcribe_refuses_raw_output_aliasing_input_audio(tmp_path: Path):
+    from music_re.core.backends.drum_backend import DrumTranscriber
+
+    wav = tmp_path / "foo_raw.wav"
+    original = _write_test_wav(wav)
+
+    with pytest.raises(ValueError, match="raw output path cannot be identical to audio_path"):
+        DrumTranscriber().transcribe(wav, tmp_path / "foo.wav")
+    with pytest.raises(ValueError, match="raw output path cannot be identical to audio_path"):
+        DrumTranscriber().transcribe(wav, tmp_path / "foo.wav", save_raw=True)
+    assert wav.read_bytes() == original
+    assert not (tmp_path / "foo.wav").exists()
+
+    result = DrumTranscriber().transcribe(wav, tmp_path / "foo.wav", save_raw=False)
+    assert result.raw_midi_path is None
+    assert wav.read_bytes() == original
+
+
+def test_transcribe_refuses_raw_output_aliasing_main_output(tmp_path: Path):
+    from music_re.core.backends.drum_backend import DrumTranscriber
+
+    wav = tmp_path / "drums.wav"
+    _write_test_wav(wav)
+    out = tmp_path / "out.mid"
+    out.write_bytes(b"MThd")
+    (tmp_path / "out_raw.mid").symlink_to(out)
+
+    with pytest.raises(ValueError, match="raw output path cannot be identical to output_midi_path"):
+        DrumTranscriber().transcribe(wav, out)
+
+
+def test_transcribe_refuses_hardlink_of_input_audio(tmp_path: Path):
+    import os
+    from music_re.core.backends.drum_backend import DrumTranscriber
+
+    wav = tmp_path / "drums.wav"
+    original = _write_test_wav(wav)
+    link = tmp_path / "hard.mid"
+    os.link(wav, link)
+
+    with pytest.raises(ValueError, match="output_midi_path cannot be identical to audio_path"):
+        DrumTranscriber().transcribe(wav, link, save_raw=False)
+    assert wav.read_bytes() == original

@@ -1,4 +1,6 @@
 import functools
+import inspect
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Union
@@ -19,9 +21,14 @@ class TranscriberBackend(ABC):
         if impl is None or getattr(impl, "__isabstractmethod__", False):
             return
 
+        signature = inspect.signature(impl)
+
         @functools.wraps(impl)
         def transcribe(self, audio_path, output_midi_path, *args, **kwargs):
-            ensure_distinct_output(audio_path, output_midi_path)
+            bound = signature.bind(self, audio_path, output_midi_path, *args, **kwargs)
+            bound.apply_defaults()
+            ensure_distinct_output(audio_path, output_midi_path,
+                                   save_raw=bool(bound.arguments.get("save_raw", False)))
             return impl(self, audio_path, output_midi_path, *args, **kwargs)
 
         cls.transcribe = transcribe
@@ -42,10 +49,32 @@ class TranscriberBackend(ABC):
         pass
 
 
-def ensure_distinct_output(audio_path, output_midi_path) -> None:
-    """Refuse an output path that resolves to the input audio file."""
-    if Path(audio_path).resolve() == Path(output_midi_path).resolve():
+def raw_output_path(output_midi_path) -> Path:
+    """Path of the raw (unquantized) side output written next to the main MIDI."""
+    out = Path(output_midi_path).resolve()
+    return out.with_name(f'{out.stem}_raw{out.suffix}')
+
+
+def _same_file(a, b) -> bool:
+    a, b = Path(a), Path(b)
+    if a.resolve() == b.resolve():
+        return True
+    try:
+        return a.exists() and b.exists() and os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def ensure_distinct_output(audio_path, output_midi_path, save_raw: bool = False) -> None:
+    """Refuse output paths (main or raw) that alias the input audio file or each other."""
+    if _same_file(audio_path, output_midi_path):
         raise ValueError("output_midi_path cannot be identical to audio_path")
+    if save_raw:
+        raw = raw_output_path(output_midi_path)
+        if _same_file(audio_path, raw):
+            raise ValueError("raw output path cannot be identical to audio_path")
+        if _same_file(output_midi_path, raw):
+            raise ValueError("raw output path cannot be identical to output_midi_path")
 
 
 def save_transcription(pm, output_path, raw_pm, backend, parameters) -> TranscriptionResult:
@@ -54,7 +83,7 @@ def save_transcription(pm, output_path, raw_pm, backend, parameters) -> Transcri
     out = Path(output_path).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     count = sum(len(i.notes) for i in pm.instruments)
-    raw_out = out.with_name(f'{out.stem}_raw{out.suffix}') if raw_pm is not None else None
+    raw_out = raw_output_path(out) if raw_pm is not None else None
     with tempfile.TemporaryDirectory(dir=out.parent) as temp:
         staged = Path(temp) / 'result.mid'
         pm.write(str(staged))

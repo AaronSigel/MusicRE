@@ -8,6 +8,7 @@ from rich.table import Table
 
 from music_re.core.analyzer import analyze_audio
 from music_re.core.backends import get_structure_analyzer, get_transcriber_backend
+from music_re.core.backends.transcriber_base import ensure_distinct_output
 from music_re.core.export import export_bundle
 from music_re.core.midi_digest import generate_midi_digest
 from music_re.core.pipeline import run_pipeline
@@ -94,11 +95,14 @@ def cmd_to_midi(stem_file: Path, mode: str = typer.Option('tonal', '--mode', '-m
                 onsets_only: bool = typer.Option(False, '--onsets-only'),
                 out: Optional[Path] = typer.Option(None, '--out', '-o')):
     """Transcribe audio to MIDI; missing model output is an error."""
-    if out is not None and out.resolve() == stem_file.resolve():
+    out = out or stem_file.with_suffix('.mid')
+    try:
+        ensure_distinct_output(stem_file, out, save_raw=raw)
+    except ValueError:
         raise typer.BadParameter('Output MIDI file cannot overwrite the input audio file.')
     tl = MusicalTimeline.model_validate_json(timeline.read_text()) if timeline else None
     result = get_transcriber_backend(mode=mode).transcribe(
-        stem_file, out or stem_file.with_suffix('.mid'), timeline=tl, bpm=bpm,
+        stem_file, out, timeline=tl, bpm=bpm,
         save_raw=raw, grid_subdivisions=grid, quantize_ends=not onsets_only)
     console.print(f'Saved {mode} MIDI ({result.status}) to: {result.midi_path}')
 
