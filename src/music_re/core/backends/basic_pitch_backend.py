@@ -8,6 +8,7 @@ from typing import Optional, Union
 import pretty_midi
 
 from music_re.core.backends.transcriber_base import TranscriberBackend, save_transcription
+from music_re.core.dereverb import suppress_reverb_and_tails
 from music_re.core.midi_quantize import quantize_to_timeline, build_quantize_grid
 from music_re.schemas import MusicalTimeline, TranscriptionResult
 
@@ -21,12 +22,14 @@ class BasicPitchTranscriber(TranscriberBackend):
         frame_threshold: float = 0.3,
         minimum_note_length: float = 127.7,
         min_velocity: int = 25,
+        suppress_reverb: bool = False,
     ):
         super().__init__(backend_name="basic_pitch", mode="tonal")
         self.onset_threshold = onset_threshold
         self.frame_threshold = frame_threshold
         self.minimum_note_length = minimum_note_length
         self.min_velocity = min_velocity
+        self.suppress_reverb = suppress_reverb
 
     def transcribe(
         self,
@@ -39,6 +42,7 @@ class BasicPitchTranscriber(TranscriberBackend):
         grid_subdivisions: int = 4,
         quantize_ends: bool = True,
         stem_name: Optional[str] = None,
+        suppress_reverb: Optional[bool] = None,
     ) -> TranscriptionResult:
         build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
         in_p = Path(audio_path).resolve()
@@ -65,12 +69,27 @@ class BasicPitchTranscriber(TranscriberBackend):
         from basic_pitch import build_icassp_2022_model_path, FilenameSuffix
         model_to_use = build_icassp_2022_model_path(FilenameSuffix.onnx)
 
+        do_dereverb = (stem_name == "other") if suppress_reverb is None else suppress_reverb
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_dir_path = Path(tmp_dir)
 
+            audio_to_transcribe = in_p
+            if do_dereverb:
+                try:
+                    import soundfile as sf
+                    from music_re.core.audio_io import decode_audio
+                    data, sr = decode_audio(in_p, normalize_db=None)
+                    cleaned_data = suppress_reverb_and_tails(data, sr=sr)
+                    clean_wav = tmp_dir_path / f"dereverbed_{in_p.stem}.wav"
+                    sf.write(str(clean_wav), cleaned_data, sr)
+                    audio_to_transcribe = clean_wav
+                except Exception:
+                    audio_to_transcribe = in_p
+
             with contextlib.redirect_stdout(sys.stderr):
                 predict_and_save(
-                    audio_path_list=[str(in_p)],
+                    audio_path_list=[str(audio_to_transcribe)],
                     output_directory=str(tmp_dir_path),
                     save_midi=True,
                     sonify_midi=False,
