@@ -41,7 +41,7 @@ def _valid(paths, hashes):
 
 
 def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', profile='balanced',
-                 progress_callback=None) -> dict:
+                 progress_callback=None, separator_backend='demucs') -> dict:
     settings = resolve_profile(profile, six_stems)
     resolved_device = resolve_device(device)
     source = Path(file_path).resolve()
@@ -50,11 +50,12 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
     ws = workspace if workspace is not None else WorkspaceManager()
     
     with ws.lock(source):
-        config = settings.to_dict() | dict(requested_device=device, device=resolved_device)
+        config = settings.to_dict() | dict(requested_device=device, device=resolved_device, separator_backend=separator_backend)
         packages = {name: version(name) for name in ('music-re', 'torch', 'torchaudio', 'demucs',
                                                     'all-in-one-infer', 'basic-pitch', 'librosa', 'mir-eval', 'museval')}
+        separator_model_id = 'scnet' if separator_backend == 'scnet' else ('htdemucs_6s' if settings.six_stems else 'htdemucs')
         runtime = dict(packages=packages, python=__import__('platform').python_version(),
-                       model_ids=dict(separator='htdemucs_6s' if settings.six_stems else 'htdemucs',
+                       model_ids=dict(separator=separator_model_id,
                                       structure=settings.structure_model, tonal='icassp_2022/nmp.onnx', drums='multiband'))
         runtime['weights'] = model_inventory(runtime['model_ids']['separator'], settings.structure_model)
         root = ws.get_track_dir(source)
@@ -99,6 +100,7 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                     progress_callback(f'Running {stage}.')
                 if stage == 'separation':
                     result = separate_stems(source, workspace=ws, six_stems=settings.six_stems,
+                                            backend_name=separator_backend,
                                             device=resolved_device, shifts=settings.shifts, overlap=settings.overlap,
                                             force=not changed,
                                             seed=settings.seed,

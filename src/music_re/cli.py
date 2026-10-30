@@ -81,12 +81,19 @@ def cmd_structure(file: Path, backend: str = typer.Option('auto', '--backend', '
 
 @app.command('split')
 def cmd_split(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '-6'),
+              backend: str = typer.Option('demucs', '--backend', '-b',
+                                          click_type=click.Choice(['demucs', 'scnet'], case_sensitive=False)),
               device: str = typer.Option('auto', '--device', '-d'),
               cache_root: Optional[Path] = typer.Option(None, '--cache-root')):
-    """Separate stems using Demucs."""
+    """Separate stems using Demucs or SCNet."""
     err_console = Console(stderr=True)
+    import inspect
+    sig = inspect.signature(separate_stems)
+    kwargs = {}
+    if 'backend_name' in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        kwargs['backend_name'] = backend
     result = separate_stems(file, workspace=WorkspaceManager(cache_root=cache_root), six_stems=six_stems,
-                            device=device, progress_callback=err_console.print)
+                            device=device, progress_callback=err_console.print, **kwargs)
     typer.echo(result.model_dump_json(indent=2))
 
 
@@ -221,12 +228,20 @@ def cmd_export(file: Path, out: Path = typer.Option(..., '--out', '-o'),
 def cmd_deconstruct(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '-6'),
                      device: str = typer.Option('auto', '--device', '-d'),
                      profile: str = typer.Option('balanced', '--profile', '-p'),
+                     separator_backend: str = typer.Option('demucs', '--separator-backend',
+                                                           click_type=click.Choice(['demucs', 'scnet'], case_sensitive=False)),
                      cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                      as_json: bool = typer.Option(False, '--json')):
     """Run the shared resumable pipeline."""
     try:
+        import inspect
+        sig = inspect.signature(run_pipeline)
+        kwargs = {}
+        if 'separator_backend' in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs['separator_backend'] = separator_backend
         result = run_pipeline(file, workspace=WorkspaceManager(cache_root=cache_root), six_stems=six_stems,
-                              device=device, profile=profile, progress_callback=None if as_json else console.print)
+                              device=device, profile=profile,
+                              progress_callback=None if as_json else console.print, **kwargs)
     except Exception as e:
         Console(stderr=True).print(f'[red]Pipeline failed:[/red] {e}')
         raise typer.Exit(1)

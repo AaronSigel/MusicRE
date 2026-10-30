@@ -17,6 +17,12 @@ def _ensure_default_separators() -> None:
             register_separator_backend("demucs", DemucsSeparator)
         except ImportError:
             pass
+    if "scnet" not in _SEPARATOR_REGISTRY:
+        try:
+            from music_re.core.backends.scnet_backend import SCNetSeparator
+            register_separator_backend("scnet", SCNetSeparator)
+        except ImportError:
+            pass
 
 
 def _ensure_default_structure_analyzers() -> None:
