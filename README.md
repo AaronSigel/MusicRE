@@ -24,7 +24,8 @@ MusicRE is a local-first Python application, CLI, and MCP server for music decom
    - Percussion: Multi-band frequency energy detection (Kick MIDI 36, Snare MIDI 38, Hi-Hat MIDI 42).
    - Dual export: Unquantized raw (`<stem>_raw.mid`) and timeline-quantized (`<stem>.mid`).
    - Integrated project: Single multi-track SMF Type 1 project (`all_stems.mid`) with General MIDI programs and Drum Channel 10.
-5. **Quality Report & Export:** Generates `quality_report.json` and exports clean bundles (folder or `.zip`).
+5. **Quality Report & Export:** Generates `quality_report.json` and exports clean bundles (folder, `.zip`, or `.dawproject`).
+   - **DAWproject Export (`--dawproject` / `-d`):** Packages stems, aligned MIDI notes, tempo map, and section markers into a standard Bitwig/Studio One project.
 
 ---
 
@@ -53,31 +54,23 @@ uv run --locked music-re deconstruct input.mp3 --cache-root ./data/cache
 uv run music-re deconstruct input.flac --six-stems --device cuda --profile quality
 ```
 
-### Individual Commands
+### 4. Transcribe stem to MIDI or inspect
 ```bash
-# Extract an audio segment
-uv run music-re slice song.wav --start 15.0 --end 30.0
+# Transcribe vocals with continuous CREPE pitch-bends
+uv run music-re to-midi vocals.wav --mode tonal --timeline timeline.json
 
-# Acoustic analysis (BPM, Key, LUFS, Beat Grid)
-uv run music-re analyze song.wav [--json]
-
-# Separate stems using Demucs adapter
-uv run music-re split song.wav [--six-stems] [--device auto|cpu|cuda]
-
-# Extract musical structure & sections (timeline.json)
-uv run music-re structure song.wav [--backend auto|librosa|allin1] [--json]
-
-# Transcribe isolated stem to MIDI with timeline synchronization
-uv run music-re to-midi vocals.wav --mode tonal --timeline timeline.json --grid 4
-# Keep original endings while snapping starts:
-uv run music-re to-midi vocals.wav --grid 8 --onsets-only
+# Transcribe drums via deep-learning ADTOF (5 classes)
 uv run music-re to-midi drums.wav --mode drums --timeline timeline.json
 
-# Inspect MIDI notes by bars for LLM reasoning
-uv run music-re inspect-midi midis/vocals.mid --bars 1-8 --bpm 120.0
+# Inspect notes across bar ranges (all, tonal, or drums)
+uv run music-re inspect-midi midis/drums.mid --bars 1-8 --bpm 120.0 --part drums
+```
 
-# Two-tier quality evaluation
-uv run music-re evaluate song.wav [--gt-stems path/to/reference_stems] [--json]
+### 5. Export DAWProject for Bitwig / Studio One / Reaper
+```bash
+# Export single DAWProject bundle with stems, MIDI, tempo map & markers
+uv run music-re export song.wav --out song.dawproject --dawproject
+```
 
 # Export clean deliverable bundle or ZIP
 uv run music-re export song.wav --out ./output_bundle [--zip] [--profile balanced]
