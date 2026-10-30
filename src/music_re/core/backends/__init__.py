@@ -59,6 +59,12 @@ def _ensure_default_transcribers() -> None:
             register_transcriber_backend("drum_multiband", DrumTranscriber)
         except ImportError:
             pass
+    if "bytedance_piano" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.piano_backend import ByteDancePianoTranscriber
+            register_transcriber_backend("bytedance_piano", ByteDancePianoTranscriber)
+        except ImportError:
+            pass
 
 
 def register_separator_backend(name: str, backend_cls: Type[SeparatorBackend]) -> None:

@@ -132,7 +132,15 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                             prior_paths.append(prior.get('raw_midi_path', ''))
                         if not changed and _valid(prior_paths, old_hashes):
                             continue
-                        transcriber = get_transcriber_backend(mode='drums' if name == 'drums' else 'tonal')
+                        if name == 'drums':
+                            transcriber = get_transcriber_backend(mode='drums')
+                        elif name == 'piano':
+                            try:
+                                transcriber = get_transcriber_backend(mode='tonal', name='bytedance_piano')
+                            except Exception:
+                                transcriber = get_transcriber_backend(mode='tonal', name='basic_pitch')
+                        else:
+                            transcriber = get_transcriber_backend(mode='tonal')
                         result = transcriber.transcribe(stem, midi_dir / f'{name}.mid', timeline=timeline, bpm=bpm,
                                                          save_raw=settings.save_raw, grid_subdivisions=settings.grid_subdivisions,
                                                          quantize_ends=settings.quantize_ends)
