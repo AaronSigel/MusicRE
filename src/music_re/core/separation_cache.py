@@ -38,6 +38,5 @@ def save_cache_record(marker, stems, context):
             raise ValueError(f'Invalid separation output: {path}')
     payload = dict(context=context, hashes={role: compute_file_content_hash(path) for role, path in stems.items()})
     marker = Path(marker)
-    temporary = marker.with_suffix('.tmp')
-    temporary.write_text(json.dumps(payload, sort_keys=True), encoding='utf-8')
-    temporary.replace(marker)
+    from music_re.workspace import _atomic_write_json
+    _atomic_write_json(marker, payload)

@@ -123,11 +123,12 @@ async def get_structure_timeline(
 
     def _run() -> Dict[str, Any]:
         ws = WorkspaceManager(cache_root=cache_root)
-        manifest = ws.get_manifest(p)
-        analyzer = get_structure_analyzer(name=backend)
-        timeline = analyzer.analyze(p, stems=manifest.stems)
-        ws.save_timeline(p, timeline)
-        return timeline.model_dump()
+        with ws.lock(p):
+            manifest = ws.get_manifest(p)
+            analyzer = get_structure_analyzer(name=backend)
+            timeline = analyzer.analyze(p, stems=manifest.stems)
+            ws.save_timeline(p, timeline)
+            return timeline.model_dump()
 
     return await asyncio.to_thread(_run)
 
@@ -144,14 +145,15 @@ async def evaluate_quality_report(
 
     def _run() -> Dict[str, Any]:
         ws = WorkspaceManager(cache_root=cache_root)
-        report = core_evaluate_quality(
-            workspace=ws,
-            file_path=p,
-            ground_truth_stems=ground_truth_stems,
-            ground_truth_midi=ground_truth_midi,
-        )
-        ws.save_quality_report(p, report)
-        return report.model_dump()
+        with ws.lock(p):
+            report = core_evaluate_quality(
+                workspace=ws,
+                file_path=p,
+                ground_truth_stems=ground_truth_stems,
+                ground_truth_midi=ground_truth_midi,
+            )
+            ws.save_quality_report(p, report)
+            return report.model_dump()
 
     return await asyncio.to_thread(_run)
 
@@ -169,14 +171,15 @@ async def export_project_bundle(
 
     def _run() -> str:
         ws = WorkspaceManager(cache_root=cache_root)
-        res = core_export_bundle(
-            workspace=ws,
-            file_path=p,
-            target_path=target_dir,
-            profile=profile,
-            archive=archive,
-        )
-        return str(res)
+        with ws.lock(p):
+            res = core_export_bundle(
+                workspace=ws,
+                file_path=p,
+                target_path=target_dir,
+                profile=profile,
+                archive=archive,
+            )
+            return str(res)
 
     return await asyncio.to_thread(_run)
 
@@ -193,8 +196,10 @@ async def deconstruct_full_pipeline(
     p = Path(file_path).resolve()
 
     def _run() -> Dict[str, Any]:
-        return run_pipeline(p, workspace=WorkspaceManager(cache_root=cache_root),
-                            six_stems=six_stems, device=device, profile=profile)
+        ws = WorkspaceManager(cache_root=cache_root)
+        with ws.lock(p):
+            return run_pipeline(p, workspace=ws,
+                                six_stems=six_stems, device=device, profile=profile)
 
     return await asyncio.to_thread(_run)
 
