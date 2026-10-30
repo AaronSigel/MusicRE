@@ -56,20 +56,22 @@ class BasicPitchTranscriber(TranscriberBackend):
         if effective_bpm <= 0:
             effective_bpm = 120.0
 
-        if stem_name == "other":
-            onset_thresh = 0.65
-            frame_thresh = 0.45
+        if stem_name in ("other", "guitar"):
+            onset_thresh = 0.68
+            frame_thresh = 0.48
             min_note_len = 180.0
+            filter_min_vel = max(self.min_velocity, 40)
         else:
             onset_thresh = self.onset_threshold
             frame_thresh = self.frame_threshold
             min_note_len = self.minimum_note_length
+            filter_min_vel = self.min_velocity
 
         from basic_pitch.inference import predict_and_save
         from basic_pitch import build_icassp_2022_model_path, FilenameSuffix
         model_to_use = build_icassp_2022_model_path(FilenameSuffix.onnx)
 
-        do_dereverb = (stem_name == "other") if suppress_reverb is None else suppress_reverb
+        do_dereverb = (stem_name in ("other", "guitar")) if suppress_reverb is None else suppress_reverb
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_dir_path = Path(tmp_dir)
@@ -110,12 +112,12 @@ class BasicPitchTranscriber(TranscriberBackend):
 
             pm = pretty_midi.PrettyMIDI(str(raw_midi), initial_tempo=effective_bpm)
 
-            # Post-filter MIDI notes: remove velocity < min_velocity or duration < 0.08s
+            # Post-filter MIDI notes: remove velocity < filter_min_vel or duration < 0.08s
             min_duration = 0.08
             for inst in pm.instruments:
                 inst.notes = [
                     n for n in inst.notes
-                    if n.velocity >= self.min_velocity and (n.end - n.start) >= min_duration
+                    if n.velocity >= filter_min_vel and (n.end - n.start) >= min_duration
                 ]
 
             raw_pm = copy.deepcopy(pm) if save_raw else None
