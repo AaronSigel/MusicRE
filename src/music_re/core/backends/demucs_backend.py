@@ -42,11 +42,17 @@ class DemucsSeparator(SeparatorBackend):
         if self._model is not None:
             return
 
-        from demucs.pretrained import get_model
+        from demucs_infer.pretrained import get_model
+        from demucs_infer.states import load_model
 
         with contextlib.redirect_stdout(sys.stderr):
             try:
-                model = get_model(self.model_name)
+                # Direct load from cache if pre-packaged checkpoint exists
+                cache_file = Path.home() / ".cache" / "demucs-infer" / f"5c90dfd2-34c22ccb.th"
+                if self.model_name == "htdemucs_6s" and cache_file.is_file():
+                    model = load_model(cache_file)
+                else:
+                    model = get_model(self.model_name)
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to load Demucs model '{self.model_name}': {e}"
