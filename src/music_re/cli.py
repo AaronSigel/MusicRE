@@ -38,7 +38,7 @@ def cmd_analyze(file: Path, as_json: bool = typer.Option(False, '--json')):
     """Analyze tempo, key, loudness, and beats."""
     analysis = analyze_audio(file)
     if as_json:
-        console.print(analysis.model_dump_json(indent=2))
+        typer.echo(analysis.model_dump_json(indent=2))
         return
     table = Table(title=f'Acoustic Analysis: {file.name}')
     table.add_column('Property')
@@ -53,14 +53,15 @@ def cmd_analyze(file: Path, as_json: bool = typer.Option(False, '--json')):
 @app.command('structure')
 def cmd_structure(file: Path, backend: str = typer.Option('auto', '--backend', '-b'),
                   device: str = typer.Option('auto', '--device', '-d'),
+                  cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                   as_json: bool = typer.Option(False, '--json')):
     """Extract timeline; Librosa reports unknown labels and no downbeats."""
-    ws = WorkspaceManager()
+    ws = WorkspaceManager(cache_root=cache_root)
     analyzer = get_structure_analyzer(name=backend)
     timeline = analyzer.analyze(file, stems=ws.get_manifest(file).stems, device=device)
     ws.save_timeline(file, timeline)
     if as_json:
-        console.print(timeline.model_dump_json(indent=2))
+        typer.echo(timeline.model_dump_json(indent=2))
         return
     table = Table(title=f'Structure Analysis: {file.name} ({analyzer.backend_name})')
     table.add_column('Property')
@@ -79,11 +80,12 @@ def cmd_structure(file: Path, backend: str = typer.Option('auto', '--backend', '
 
 @app.command('split')
 def cmd_split(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '-6'),
-              device: str = typer.Option('auto', '--device', '-d')):
+              device: str = typer.Option('auto', '--device', '-d'),
+              cache_root: Optional[Path] = typer.Option(None, '--cache-root')):
     """Separate stems using Demucs."""
-    result = separate_stems(file, workspace=WorkspaceManager(), six_stems=six_stems,
+    result = separate_stems(file, workspace=WorkspaceManager(cache_root=cache_root), six_stems=six_stems,
                             device=device, progress_callback=console.print)
-    console.print(result.model_dump_json(indent=2))
+    typer.echo(result.model_dump_json(indent=2))
 
 
 @app.command('to-midi')
@@ -118,7 +120,7 @@ def cmd_inspect_midi(midi_file: Path, bars: str = typer.Option('1-8', '--bars'),
         raise typer.BadParameter('bars must have form 1-8')
     digest = generate_midi_digest(midi_file, bpm=bpm, start_bar=start, end_bar=end)
     if as_json:
-        console.print(digest.model_dump_json(indent=2))
+        typer.echo(digest.model_dump_json(indent=2))
         return
     table = Table(title=f'MIDI Digest: {midi_file.name} (Bars {bars}, BPM {bpm})')
     for name in ['Bar', 'Beat', 'Note', 'Pitch', 'Length (beats)', 'Velocity']:
@@ -133,13 +135,23 @@ def cmd_inspect_midi(midi_file: Path, bars: str = typer.Option('1-8', '--bars'),
 @app.command('evaluate')
 def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(None, '--gt-stems'),
                   ground_truth_midi: Optional[Path] = typer.Option(None, '--gt-midi'),
+                  cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                   as_json: bool = typer.Option(False, '--json')):
     """Evaluate reference metrics or report diagnostics."""
-    ws = WorkspaceManager()
+    ws = WorkspaceManager(cache_root=cache_root)
+    manifest = ws.get_manifest(file)
+    track_dir = ws.get_track_dir(file)
+    on_disk = any(p.suffix.lower() in {'.wav', '.flac', '.mid', '.midi'}
+                  for p in track_dir.rglob('*') if p.is_file())
+    if not manifest.stems and not manifest.midis and not on_disk:
+        typer.echo(f'No stems or MIDI found for {file} in workspace {track_dir} '
+                   f'(cache root: {ws.cache_root}). Run split/deconstruct with the same --cache-root first.',
+                   err=True)
+        raise typer.Exit(1)
     report = evaluate_quality(ws, file, ground_truth_stems, ground_truth_midi)
     ws.save_quality_report(file, report)
     if as_json:
-        console.print(report.model_dump_json(indent=2))
+        typer.echo(report.model_dump_json(indent=2))
         return
     table = Table(title=f'Quality Evaluation: {file.name}')
     table.add_column('Metric')
