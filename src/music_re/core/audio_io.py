@@ -14,7 +14,7 @@ def normalize_audio(data: np.ndarray, target_peak_db: float = -1.0) -> np.ndarra
     if not np.all(np.isfinite(data)):
         raise ValueError("Audio data contains NaN or Inf values")
     if data.size == 0:
-        raise ValueError("Audio data is empty/zero-length")
+        return data.astype(np.float32)
     target_amplitude = 10.0 ** (target_peak_db / 20.0)
     current_peak = float(np.max(np.abs(data)))
     if current_peak == 0.0:
