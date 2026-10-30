@@ -80,12 +80,14 @@ def cmd_structure(file: Path, backend: str = typer.Option('auto', '--backend', '
 
 
 @app.command('split')
-def cmd_split(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '-6'),
+def cmd_split(file: Path,
+              six_stems: bool = typer.Option(False, '--six-stems', '-6',
+                                             help='Separate into 6 stems (adds guitar and piano; recommended for dense/polyphonic mixes).'),
               backend: str = typer.Option('demucs', '--backend', '-b',
                                           click_type=click.Choice(['demucs', 'scnet'], case_sensitive=False)),
               device: str = typer.Option('auto', '--device', '-d'),
               cache_root: Optional[Path] = typer.Option(None, '--cache-root')):
-    """Separate stems using Demucs or SCNet."""
+    """Separate stems using Demucs or SCNet. Use --six-stems / -6 for complex tracks with guitar and piano."""
     err_console = Console(stderr=True)
     import inspect
     sig = inspect.signature(separate_stems)
@@ -225,14 +227,17 @@ def cmd_export(file: Path, out: Path = typer.Option(..., '--out', '-o'),
 
 
 @app.command('deconstruct')
-def cmd_deconstruct(file: Path, six_stems: bool = typer.Option(False, '--six-stems', '-6'),
+def cmd_deconstruct(file: Path,
+                     six_stems: bool = typer.Option(False, '--six-stems', '-6',
+                                                    help='Separate into 6 stems (adds guitar and piano; recommended for dense/polyphonic mixes).'),
                      device: str = typer.Option('auto', '--device', '-d'),
-                     profile: str = typer.Option('balanced', '--profile', '-p'),
+                     profile: str = typer.Option('balanced', '--profile', '-p',
+                                                 help='Execution profile (fast, balanced, quality, dense, six_stems).'),
                      separator_backend: str = typer.Option('demucs', '--separator-backend',
                                                            click_type=click.Choice(['demucs', 'scnet'], case_sensitive=False)),
                      cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                      as_json: bool = typer.Option(False, '--json')):
-    """Run the shared resumable pipeline."""
+    """Run the shared resumable pipeline. Use --six-stems / -6 (or profile 'dense' / 'six_stems') for complex tracks with guitar and piano."""
     try:
         import inspect
         sig = inspect.signature(run_pipeline)

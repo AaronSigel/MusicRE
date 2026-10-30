@@ -77,6 +77,8 @@ def build_combined_midi_project(
         combined_pm.time_signature_changes = [pretty_midi.TimeSignature(numerator=4, denominator=4, time=0.0)]
 
     for stem_name, stem_path in stem_midis.items():
+        if stem_name.lower() == "all_stems":
+            continue
         stem_p = Path(stem_path).resolve()
         if not stem_p.is_file():
             raise ValueError(f"Missing stem MIDI file for '{stem_name}': {stem_p}")

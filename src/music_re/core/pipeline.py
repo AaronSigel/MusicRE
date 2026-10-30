@@ -136,9 +136,9 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                     if bars:
                         sr = 22050
                         y = None
-                        if manifest.stems and ('other' in manifest.stems or 'bass' in manifest.stems):
+                        if manifest.stems and any(s in manifest.stems for s in ('piano', 'guitar', 'other', 'bass')):
                             stem_signals = []
-                            for s_name in ('other', 'bass'):
+                            for s_name in ('piano', 'guitar', 'other', 'bass'):
                                 if s_name in manifest.stems and Path(manifest.stems[s_name]).is_file():
                                     try:
                                         sig, _ = decode_audio(manifest.stems[s_name], target_sr=sr, normalize_db=None)
@@ -186,7 +186,10 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                         if not changed and _valid(prior_paths, old_hashes):
                             continue
                         if name == 'drums':
-                            transcriber = get_transcriber_backend(mode='drums')
+                            try:
+                                transcriber = get_transcriber_backend(mode='drums', name='adtof')
+                            except Exception:
+                                transcriber = get_transcriber_backend(mode='drums')
                         elif name == 'piano':
                             try:
                                 transcriber = get_transcriber_backend(mode='tonal', name='bytedance_piano')
@@ -197,6 +200,8 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                                 transcriber = get_transcriber_backend(mode='tonal', name='crepe_vocal')
                             except Exception:
                                 transcriber = get_transcriber_backend(mode='tonal', name='basic_pitch')
+                        elif name in ('bass', 'guitar', 'other'):
+                            transcriber = get_transcriber_backend(mode='tonal', name='basic_pitch')
                         else:
                             transcriber = get_transcriber_backend(mode='tonal')
                         result = transcriber.transcribe(stem, midi_dir / f'{name}.mid', timeline=timeline, bpm=bpm,
