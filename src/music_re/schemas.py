@@ -39,6 +39,14 @@ class TranscriptionResult(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class BarChord(BaseModel):
+    bar: int
+    start_sec: float
+    end_sec: float
+    chord: str
+    confidence: float
+
+
 class TimelineSection(BaseModel):
     label: str = Field(description="Section label, e.g. 'intro', 'verse', 'chorus', 'bridge', 'outro'")
     start_sec: float = Field(description="Start time in seconds")
@@ -52,6 +60,7 @@ class MusicalTimeline(BaseModel):
     beats: List[float] = Field(description="Beat timestamps in seconds")
     downbeats: List[float] = Field(description="Downbeat / bar start timestamps in seconds")
     sections: List[TimelineSection] = Field(default_factory=list)
+    chords: List[BarChord] = Field(default_factory=list)
     backend: Optional[str] = None
     model: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)

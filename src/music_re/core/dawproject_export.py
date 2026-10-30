@@ -146,15 +146,22 @@ def export_dawproject(
         structure_tracks.append(midi_track)
         arrangement_lanes.append(midi_clips)
 
-    # 3. Markers from timeline sections
-    markers = None
+    # 3. Markers from timeline sections and chords
+    marker_list = []
     if timeline and getattr(timeline, "sections", None):
-        marker_list = [
-            Marker(time=float(s.start_sec), name=str(s.label))
-            for s in timeline.sections
-        ]
-        if marker_list:
-            markers = Markers(markers=marker_list)
+        for s in timeline.sections:
+            marker_list.append(Marker(time=float(s.start_sec), name=str(s.label)))
+
+    if timeline and getattr(timeline, "chords", None):
+        prev_chord = None
+        for c in timeline.chords:
+            c_chord = getattr(c, "chord", None) or (c.get("chord") if isinstance(c, dict) else None)
+            c_time = getattr(c, "start_sec", None) if hasattr(c, "start_sec") else (c.get("start_sec") if isinstance(c, dict) else 0.0)
+            if c_chord and c_chord != "N/A" and c_chord != prev_chord:
+                marker_list.append(Marker(time=float(c_time), name=str(c_chord)))
+                prev_chord = c_chord
+
+    markers = Markers(markers=marker_list) if marker_list else None
 
     # 4. Transport tempo & time signature
     tempo_bpm = 120.0

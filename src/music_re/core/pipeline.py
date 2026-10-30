@@ -10,13 +10,16 @@ import pretty_midi
 import torch
 
 from music_re.core.analyzer import analyze_audio
+from music_re.core.audio_io import decode_audio
 from music_re.core.backends import get_structure_analyzer, get_transcriber_backend
 from music_re.core.backends.separator_base import resolve_device
+from music_re.core.chords import detect_chords_for_bars
 from music_re.core.midi_project import build_combined_midi_project
 from music_re.core.profiles import resolve_profile
 from music_re.core.provenance import model_inventory
 from music_re.core.quality import evaluate_quality
 from music_re.core.separator import separate_stems
+from music_re.schemas import BarChord
 from music_re.workspace import WorkspaceManager, compute_file_content_hash
 
 STAGES = ['separation', 'analysis', 'structure', 'transcription', 'evaluation']
@@ -114,6 +117,54 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                     kwargs = dict(model_name=settings.structure_model) if settings.structure_model else {}
                     analyzer = get_structure_analyzer(name=settings.structure_backend, **kwargs)
                     timeline = analyzer.analyze(source, stems=manifest.stems, device=resolved_device)
+
+                    bars = []
+                    if timeline.downbeats and len(timeline.downbeats) >= 2:
+                        for i in range(len(timeline.downbeats) - 1):
+                            bars.append((timeline.downbeats[i], timeline.downbeats[i + 1]))
+                        if timeline.downbeats[-1] < timeline.duration_sec:
+                            bars.append((timeline.downbeats[-1], timeline.duration_sec))
+                    elif timeline.beats and len(timeline.beats) >= 2:
+                        bar_starts = timeline.beats[::4]
+                        for i in range(len(bar_starts) - 1):
+                            bars.append((bar_starts[i], bar_starts[i + 1]))
+                        if bar_starts and bar_starts[-1] < timeline.duration_sec:
+                            bars.append((bar_starts[-1], timeline.duration_sec))
+
+                    if bars:
+                        sr = 22050
+                        y = None
+                        if manifest.stems and ('other' in manifest.stems or 'bass' in manifest.stems):
+                            stem_signals = []
+                            for s_name in ('other', 'bass'):
+                                if s_name in manifest.stems and Path(manifest.stems[s_name]).is_file():
+                                    try:
+                                        sig, _ = decode_audio(manifest.stems[s_name], target_sr=sr, normalize_db=None)
+                                        if sig.ndim > 1:
+                                            sig = np.mean(sig, axis=1)
+                                        stem_signals.append(sig)
+                                    except Exception:
+                                        pass
+                            if stem_signals:
+                                max_len = max(len(s) for s in stem_signals)
+                                y = np.zeros(max_len, dtype=np.float32)
+                                for s in stem_signals:
+                                    y[:len(s)] += s
+
+                        if y is None:
+                            try:
+                                y, _ = decode_audio(source, target_sr=sr, normalize_db=None)
+                                if y.ndim > 1:
+                                    y = np.mean(y, axis=1)
+                            except Exception:
+                                y = None
+
+                        if y is not None and len(y) > 0:
+                            detected_chords = detect_chords_for_bars(y, sr, bars)
+                            timeline.chords = [
+                                BarChord(**c) if isinstance(c, dict) else c for c in detected_chords
+                            ]
+
                     ws.save_timeline(source, timeline)
                 elif stage == 'transcription':
                     timeline = ws.load_timeline(source)
