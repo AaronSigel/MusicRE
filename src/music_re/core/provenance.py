@@ -20,15 +20,18 @@ def model_inventory(separator_model, structure_model):
     # Demucs 4.1 prefers Hugging Face safetensors; older releases use
     # torch.hub .th files. Record the preferred available representation.
     from huggingface_hub import try_to_load_from_cache
-    from demucs.hf import hf_repo_name, DEFAULT_NAMESPACE
-    repo = f'{DEFAULT_NAMESPACE}/{hf_repo_name(separator_model)}'
-    cached_definition = try_to_load_from_cache(repo, f'{separator_model}.yaml')
-    if isinstance(cached_definition, str):
-        result['separator'].append(_describe(cached_definition))
-        for signature in yaml.safe_load(Path(cached_definition).read_text())['models']:
-            cached = try_to_load_from_cache(repo, f'{signature}.safetensors')
-            if isinstance(cached, str):
-                result['separator'].append(_describe(cached))
+    try:
+        from demucs.hf import hf_repo_name, DEFAULT_NAMESPACE
+        repo = f'{DEFAULT_NAMESPACE}/{hf_repo_name(separator_model)}'
+        cached_definition = try_to_load_from_cache(repo, f'{separator_model}.yaml')
+        if isinstance(cached_definition, str):
+            result['separator'].append(_describe(cached_definition))
+            for signature in yaml.safe_load(Path(cached_definition).read_text())['models']:
+                cached = try_to_load_from_cache(repo, f'{signature}.safetensors')
+                if isinstance(cached, str):
+                    result['separator'].append(_describe(cached))
+    except (ImportError, Exception):
+        pass
     definition = Path(demucs.locate_file(f'demucs/remote/{separator_model}.yaml'))
     if not result['separator'] and definition.is_file():
         signatures = yaml.safe_load(definition.read_text())['models']

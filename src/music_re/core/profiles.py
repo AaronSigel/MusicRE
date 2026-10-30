@@ -36,7 +36,7 @@ def resolve_profile(name: str, six_stems: bool = False) -> PipelineSettings:
     if key in ('dense', 'six_stems', 'six-stems', 'quality_6s', 'quality-6s'):
         return PipelineSettings(name, True, 2, .5, 'allin1', 'harmonix-all', True, True)
     if key == 'fast':
-        return PipelineSettings(name, six_stems, 0, .1, 'librosa', None, False, False)
+        return PipelineSettings(name, False, 0, .1, 'librosa', None, False, False)
     if key == 'balanced':
         return PipelineSettings(name, six_stems, 1, .25, 'allin1', 'harmonix-fold0', True, True)
     if key == 'quality':
