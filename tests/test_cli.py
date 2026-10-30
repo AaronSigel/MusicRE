@@ -40,3 +40,14 @@ def test_cli_inspect_midi_command(tmp_path: Path):
     assert result.exit_code == 0
     assert "C4" in result.stdout
     assert "1" in result.stdout
+
+def test_cli_to_midi_refuses_overwriting_input_audio(tmp_path: Path):
+    sr = 22050
+    in_wav = tmp_path / "drums.wav"
+    sf.write(str(in_wav), np.zeros(sr), sr)
+    original = in_wav.read_bytes()
+
+    result = runner.invoke(app, ["to-midi", str(in_wav), "--mode", "drums", "--out", str(in_wav)])
+    assert result.exit_code != 0
+    assert in_wav.read_bytes() == original
+    assert in_wav.read_bytes().startswith(b"RIFF")

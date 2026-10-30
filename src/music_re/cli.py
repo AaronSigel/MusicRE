@@ -94,6 +94,8 @@ def cmd_to_midi(stem_file: Path, mode: str = typer.Option('tonal', '--mode', '-m
                 onsets_only: bool = typer.Option(False, '--onsets-only'),
                 out: Optional[Path] = typer.Option(None, '--out', '-o')):
     """Transcribe audio to MIDI; missing model output is an error."""
+    if out is not None and out.resolve() == stem_file.resolve():
+        raise typer.BadParameter('Output MIDI file cannot overwrite the input audio file.')
     tl = MusicalTimeline.model_validate_json(timeline.read_text()) if timeline else None
     result = get_transcriber_backend(mode=mode).transcribe(
         stem_file, out or stem_file.with_suffix('.mid'), timeline=tl, bpm=bpm,

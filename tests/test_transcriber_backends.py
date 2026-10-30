@@ -61,3 +61,32 @@ def test_custom_transcriber_registration(tmp_path: Path):
     res = inst.transcribe(in_f, out_f, save_raw=True)
     assert res.exists()
     assert (tmp_path / "tone_raw.mid").exists()
+
+
+def _write_test_wav(path: Path) -> bytes:
+    import numpy as np
+    import soundfile as sf
+
+    sr = 22050
+    t = np.arange(sr) / sr
+    sf.write(str(path), 0.5 * np.sin(2 * np.pi * 220 * t), sr)
+    return path.read_bytes()
+
+
+def test_transcribe_refuses_overwriting_input_audio_file(tmp_path: Path):
+    from music_re.core.backends.drum_backend import DrumTranscriber
+
+    wav = tmp_path / "drums.wav"
+    original = _write_test_wav(wav)
+
+    with pytest.raises(ValueError, match="output_midi_path cannot be identical to audio_path"):
+        DrumTranscriber().transcribe(wav, wav)
+    assert wav.read_bytes() == original
+    assert wav.read_bytes().startswith(b"RIFF")
+
+    link = tmp_path / "link.mid"
+    link.symlink_to(wav)
+    with pytest.raises(ValueError, match="output_midi_path cannot be identical to audio_path"):
+        DrumTranscriber().transcribe(wav, link)
+    assert wav.read_bytes() == original
+    assert link.is_symlink()
