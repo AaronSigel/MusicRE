@@ -63,7 +63,7 @@ def _desync_one_stem_wav(track_dir: Path, stem_id: str, extra_silence_sec: float
 
 def test_classify_stem_maps_known_and_unknown_classes():
     assert classify_stem("Drums", is_drum=True) == "drums"
-    assert classify_stem("Electric Bass", is_drum=False) == "bass"
+    assert classify_stem("Bass", is_drum=False) == "bass"  # exact Slakh inst_class; "Electric Bass" is a midi_program_name
     assert classify_stem("Theremin", is_drum=False) == "other"  # unmapped class, Review Focus #2
 
 
@@ -71,7 +71,7 @@ def test_prepare_track_builds_grouped_ground_truth(tmp_path):
     track_dir = _write_fake_slakh_track(tmp_path / "Track00001", stems=[
         ("S00", "Guitar", False, 48),
         ("S01", "Drums", True, 0),
-        ("S02", "Electric Bass", False, 33),
+        ("S02", "Bass", False, 33),
     ])  # no vocal stem at all
     out_dir = tmp_path / "prepared"
     result = prepare_track(track_dir, out_dir)
