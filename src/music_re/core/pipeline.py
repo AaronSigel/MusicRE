@@ -139,6 +139,11 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                                 transcriber = get_transcriber_backend(mode='tonal', name='bytedance_piano')
                             except Exception:
                                 transcriber = get_transcriber_backend(mode='tonal', name='basic_pitch')
+                        elif name == 'vocals':
+                            try:
+                                transcriber = get_transcriber_backend(mode='tonal', name='crepe_vocal')
+                            except Exception:
+                                transcriber = get_transcriber_backend(mode='tonal', name='basic_pitch')
                         else:
                             transcriber = get_transcriber_backend(mode='tonal')
                         result = transcriber.transcribe(stem, midi_dir / f'{name}.mid', timeline=timeline, bpm=bpm,

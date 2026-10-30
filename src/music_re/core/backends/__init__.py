@@ -65,6 +65,12 @@ def _ensure_default_transcribers() -> None:
             register_transcriber_backend("bytedance_piano", ByteDancePianoTranscriber)
         except ImportError:
             pass
+    if "crepe_vocal" not in _TRANSCRIBER_REGISTRY:
+        try:
+            from music_re.core.backends.vocal_crepe_backend import CrepeVocalTranscriber
+            register_transcriber_backend("crepe_vocal", CrepeVocalTranscriber)
+        except ImportError:
+            pass
 
 
 def register_separator_backend(name: str, backend_cls: Type[SeparatorBackend]) -> None:
