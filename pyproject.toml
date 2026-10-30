@@ -29,6 +29,7 @@ dependencies = [
     "museval==0.4.1",
     "beat-this>=1.1.0",
     "adtof-pytorch",
+    "dawproject",
 ]
 
 [project.optional-dependencies]
@@ -49,3 +50,4 @@ markers = ["models: downloads or loads external model weights", "real_e2e: opt-i
 
 [tool.uv.sources]
 adtof-pytorch = { git = "https://github.com/xavriley/ADTOF-pytorch", rev = "85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9" }
+dawproject = { git = "https://github.com/roex-audio/dawproject-py.git" }

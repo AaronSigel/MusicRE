@@ -210,9 +210,10 @@ def cmd_evaluate(file: Path, ground_truth_stems: Optional[Path] = typer.Option(N
 def cmd_export(file: Path, out: Path = typer.Option(..., '--out', '-o'),
                 profile: str = typer.Option('balanced', '--profile', '-p'),
                 archive: bool = typer.Option(False, '--zip', '-z'),
+                dawproject: bool = typer.Option(False, '--dawproject', '-d', help='Include DAWproject export format'),
                 cache_root: Optional[Path] = typer.Option(None, '--cache-root')):
     """Export a complete deliverable bundle."""
-    result = export_bundle(WorkspaceManager(cache_root=cache_root), file, out, profile, archive)
+    result = export_bundle(WorkspaceManager(cache_root=cache_root), file, out, profile, archive, export_dawproject=dawproject)
     console.print(f'Export complete: {result}')
 
 

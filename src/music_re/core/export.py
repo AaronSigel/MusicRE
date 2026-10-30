@@ -8,6 +8,7 @@ from pathlib import Path
 import pretty_midi
 import soundfile as sf
 
+from music_re.core.dawproject_export import export_dawproject as generate_dawproject
 from music_re.core.profiles import resolve_profile
 from music_re.schemas import MusicalTimeline, QualityReport, TranscriptionResult
 from music_re.workspace import compute_file_content_hash
@@ -84,11 +85,15 @@ def validate_bundle(workspace, file_path, profile='balanced'):
     return manifest, {name: Path(path) for name, path in files.items()}
 
 
-def export_bundle(workspace, file_path, target_path, profile='balanced', archive=False) -> Path:
+def export_bundle(workspace, file_path, target_path, profile='balanced', archive=False, export_dawproject: bool = False) -> Path:
     source = Path(file_path).resolve()
     target = Path(target_path).resolve()
     root = workspace.get_track_dir(source)
-    actual = target if not archive or target.suffix == '.zip' else target.with_suffix('.zip')
+    is_direct_daw = export_dawproject and target.suffix == '.dawproject'
+    if is_direct_daw:
+        actual = target
+    else:
+        actual = target if not archive or target.suffix == '.zip' else target.with_suffix('.zip')
     for path in (target, actual):
         if path == source:
             raise ValueError('Target path cannot overwrite source input file')
@@ -101,21 +106,34 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
     manifest, files = validate_bundle(workspace, source, profile)
     actual.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.music-re-export-', dir=actual.parent) as temp:
+        if is_direct_daw:
+            staged_daw = Path(temp) / actual.name
+            generate_dawproject(workspace, source, staged_daw)
+            os.link(staged_daw, actual)
+            return actual
         staged = Path(temp) / 'bundle'
         staged.mkdir()
         for relative, original in files.items():
             dest = staged / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(original, dest)
+        if export_dawproject:
+            daw_file = staged / f'{source.stem}.dawproject'
+            generate_dawproject(workspace, source, daw_file)
         portable = manifest.model_dump()
         portable['runtime']['source_input_file'] = portable['input_file']
         portable['input_file'] = source.name
         portable['stems'] = {name: f'stems/{name}.wav' for name in manifest.stems}
         portable['midis'] = {name: f'midis/{name}.mid' for name in manifest.midis}
+        if export_dawproject:
+            portable['dawproject'] = f'{source.stem}.dawproject'
         for name, result in portable['transcription_results'].items():
             result['midi_path'] = f'midis/{name}.mid'
             result['raw_midi_path'] = f'midis/{name}_raw.mid' if profile != 'fast' else None
         portable['artifact_hashes'] = {'bundle': {relative: compute_file_content_hash(staged / relative) for relative in files}}
+        if export_dawproject:
+            daw_rel = f'{source.stem}.dawproject'
+            portable['artifact_hashes']['bundle'][daw_rel] = compute_file_content_hash(staged / daw_rel)
         (staged / 'manifest.json').write_text(json.dumps(portable, indent=2, sort_keys=True, allow_nan=False), encoding='utf-8')
         if archive:
             staged_zip = Path(temp) / 'bundle.zip'
@@ -128,3 +146,7 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
         else:
             staged.rename(actual)
     return actual
+
+
+export_dawproject = generate_dawproject
+
