@@ -127,6 +127,48 @@ def test_drum_class_breakdown_counts_other_gm_kit_pitches_in_each_class(tmp_path
     assert metrics['drums_by_class']['kick']['f1'] == 1.0
 
 
+def test_drum_class_f1_scores_all_five_gm_classes_and_aliases(tmp_path):
+    reference, estimate = tmp_path / 'ref_aliases5.mid', tmp_path / 'est_aliases5.mid'
+    # Reference using non-canonical GM pitches
+    write_drum_note(reference, pitch=35, start=0.0)                         # kick (Acoustic Bass Drum)
+    write_drum_note(reference, pitch=37, start=1.0, append_to=reference)    # snare (Side Stick)
+    write_drum_note(reference, pitch=44, start=2.0, append_to=reference)    # hihat (Pedal Hi-Hat)
+    write_drum_note(reference, pitch=51, start=3.0, append_to=reference)    # cymbal (Ride Cymbal 1)
+    write_drum_note(reference, pitch=41, start=4.0, append_to=reference)    # tom (Low Floor Tom)
+
+    # Estimate using canonical pitches
+    write_drum_note(estimate, pitch=36, start=0.0)                          # kick (Bass Drum 1)
+    write_drum_note(estimate, pitch=38, start=1.0, append_to=estimate)     # snare (Acoustic Snare)
+    write_drum_note(estimate, pitch=42, start=2.0, append_to=estimate)     # hihat (Closed Hi-Hat)
+    write_drum_note(estimate, pitch=49, start=3.0, append_to=estimate)     # cymbal (Crash Cymbal 1)
+    write_drum_note(estimate, pitch=47, start=4.0, append_to=estimate)     # tom (Low-Mid Tom)
+
+    metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
+
+    # Overall exact-GM drums score is 0.0 because none match exact GM pitch
+    assert metrics['drums']['onset_pitch_f1'] == 0.0
+    assert metrics['drums_by_class']['kick']['f1'] == 1.0
+    assert metrics['drums_by_class']['snare']['f1'] == 1.0
+    assert metrics['drums_by_class']['hihat']['f1'] == 1.0
+    assert metrics['drums_by_class']['cymbal']['f1'] == 1.0
+    assert metrics['drums_by_class']['tom']['f1'] == 1.0
+
+
+def test_ride_cymbal_matches_crash_in_cymbal_class(tmp_path):
+    reference, estimate = tmp_path / 'ref_ride.mid', tmp_path / 'est_crash.mid'
+    # Ground truth: Ride cymbal (pitch 51)
+    write_drum_note(reference, pitch=51, start=1.0)
+    # Estimate: Crash cymbal 1 (pitch 49)
+    write_drum_note(estimate, pitch=49, start=1.0)
+
+    metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
+
+    assert 'cymbal' in metrics['drums_by_class']
+    assert metrics['drums_by_class']['cymbal']['f1'] == 1.0
+    assert metrics['drums_by_class']['cymbal']['ref_count'] == 1
+    assert metrics['drums_by_class']['cymbal']['est_count'] == 1
+
+
 def test_drum_class_f1_scores_gm_aliases_correctly(tmp_path):
     reference, estimate = tmp_path / 'ref_aliases.mid', tmp_path / 'est_aliases.mid'
     write_drum_note(reference, pitch=35, start=0.0)

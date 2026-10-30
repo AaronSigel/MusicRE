@@ -4,9 +4,22 @@ import numpy as np
 from pathlib import Path
 
 from music_re.core.backends import get_structure_analyzer, get_transcriber_backend
-from music_re.core.backends.adtof_backend import ADTOFDrumTranscriber
+from music_re.core.backends.adtof_backend import (
+    ADTOFDrumTranscriber,
+    DEFAULT_THRESHOLDS,
+    ADTOF_GM_PITCHES,
+    ADTOF_CLASSES,
+)
 from music_re.core.backends.beat_this_backend import BeatThisStructureAnalyzer
 from music_re.schemas import MusicalTimeline
+
+
+def test_adtof_default_thresholds_and_pitches():
+    assert ADTOF_CLASSES == ["kick", "snare", "tom", "hihat", "cymbal"]
+    assert ADTOF_GM_PITCHES == [36, 38, 47, 42, 49]
+    # hihat: 0.035, cymbal: 0.20
+    assert DEFAULT_THRESHOLDS == [0.22, 0.20, 0.35, 0.035, 0.20]
+
 
 def test_beat_this_structure_analyzer_on_synthetic_audio(tmp_path):
     # Generate 3 seconds of synthetic click track (120 BPM = 0.5s intervals)

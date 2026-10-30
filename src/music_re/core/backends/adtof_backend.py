@@ -15,7 +15,7 @@ ADTOF_CLASSES = ["kick", "snare", "tom", "hihat", "cymbal"]
 # kick -> 36 (Bass Drum 1), snare -> 38 (Acoustic Snare), tom -> 47 (Low-Mid Tom),
 # hihat -> 42 (Closed Hi-Hat), cymbal -> 49 (Crash Cymbal 1)
 ADTOF_GM_PITCHES = [36, 38, 47, 42, 49]
-DEFAULT_THRESHOLDS = [0.22, 0.20, 0.35, 0.08, 0.30]
+DEFAULT_THRESHOLDS = [0.22, 0.20, 0.35, 0.035, 0.20]
 
 
 def _pick_peaks_with_strength(

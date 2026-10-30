@@ -5,16 +5,16 @@ import numpy as np
 import pretty_midi
 
 # Single source of truth for drum classes: canonical detector pitch and all valid GM aliases.
-# drum_backend.py's DrumTranscriber always emits exactly pitch 36/38/42
-# (kick/snare/hihat), but a Slakh ground-truth reference uses the full GM
-# drum kit, where the same class has several valid pitches (e.g. kick 35
-# "Acoustic Bass Drum" as well as 36). Score each class against every GM
-# pitch that belongs to it, or a reference note at pitch 35 would simply
-# vanish from every class instead of counting as a class member.
+# Transcribers emit canonical pitches (e.g. 36/38/42/47/49),
+# but ground-truth references use the full GM drum kit, where the same class has several
+# valid pitches (e.g. kick 35 as well as 36, ride 51 as well as crash 49).
+# Score each class against every GM pitch that belongs to it.
 DRUM_CLASS_DEFINITIONS = {
     'kick': {'canonical': 36, 'gm_pitches': {35, 36}},
     'snare': {'canonical': 38, 'gm_pitches': {37, 38, 40}},
     'hihat': {'canonical': 42, 'gm_pitches': {42, 44, 46}},
+    'cymbal': {'canonical': 49, 'gm_pitches': {49, 51, 52, 53, 55, 57, 59}},
+    'tom': {'canonical': 47, 'gm_pitches': {41, 43, 45, 47, 48, 50}},
 }
 DRUM_GM_PITCH_CLASSES = {k: v['gm_pitches'] for k, v in DRUM_CLASS_DEFINITIONS.items()}
 CANONICAL_DRUM_PITCHES = {k: v['canonical'] for k, v in DRUM_CLASS_DEFINITIONS.items()}
