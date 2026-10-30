@@ -139,6 +139,8 @@ def test_drum_class_f1_scores_gm_aliases_correctly(tmp_path):
 
     metrics = transcription_quality({'drums': str(estimate)}, ground_truth=str(reference))
 
+    # Overall exact-GM drums score stays 0.0 (no exact pitch match between 35/37/44 and 36/38/42)
+    assert metrics['drums']['onset_pitch_f1'] == 0.0
     assert metrics['drums_by_class']['kick']['f1'] == 1.0
     assert metrics['drums_by_class']['snare']['f1'] == 1.0
     assert metrics['drums_by_class']['hihat']['f1'] == 1.0
