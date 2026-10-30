@@ -24,7 +24,7 @@ from music_re.core.pipeline import run_pipeline
 from music_re.core.quality import evaluate_quality
 from music_re.workspace import WorkspaceManager
 from scripts.fetch_slakh_subset import fetch_babyslakh
-from scripts.slakh_mapping import prepare_track
+from scripts.slakh_mapping import ABSENT, prepare_track
 
 
 def _fresh_cache_root(base: Path) -> Path:
@@ -70,13 +70,20 @@ def _run_one(mix_path, workspace, ground_truth_stems=None, ground_truth_midi=Non
     return quality_report, error, wall_time_sec, _peak_rss_mb()
 
 
-def _false_notes_on_absent_instrument(quality_report: Optional[dict], group_note_counts: Dict[str, int]) -> Dict[str, int]:
+def _false_notes_on_absent_instrument(quality_report: Optional[dict], group_status: Dict[str, str]) -> Dict[str, int]:
+    """Notes transcribed for groups the reference marks "absent".
+
+    Only "absent" counts: a group whose reference is missing_annotation
+    (audio, no MIDI) or not_rendered really is in the song, so notes found
+    there are not false positives. A track with no group_status at all has
+    unknown completeness and contributes nothing.
+    """
     if quality_report is None:
         return {}
     stems = (quality_report.get("transcription_metrics") or {}).get("stems", {})
     return {group: stems[group]["notes_count"]
-            for group, count in group_note_counts.items()
-            if count == 0 and group in stems}
+            for group, status in group_status.items()
+            if status == ABSENT and group in stems}
 
 
 def prepare_all_tracks(track_dirs: List[Path], prepared_dir: Path):
@@ -95,7 +102,8 @@ def prepare_all_tracks(track_dirs: List[Path], prepared_dir: Path):
             prepared.append(prepare_track(track_dir, prepared_dir / track_dir.name))
         except Exception as e:
             failures.append(dict(track_id=track_dir.name, quality_report=None, wall_time_sec=0.0,
-                                  peak_ram_mb=0.0, error=str(e), false_notes_on_absent_instrument={}))
+                                  peak_ram_mb=0.0, error=str(e), false_notes_on_absent_instrument={},
+                                  group_status={}, preparation_warnings=[]))
     return prepared, failures
 
 
@@ -113,7 +121,9 @@ def run_reference_benchmarks(prepared_tracks: List[dict], cache_root: Path) -> L
             track_id=track_id, quality_report=quality_report, wall_time_sec=wall_time_sec,
             peak_ram_mb=peak_ram_mb, error=error,
             false_notes_on_absent_instrument=_false_notes_on_absent_instrument(
-                quality_report, track.get("group_note_counts", {})),
+                quality_report, track.get("group_status", {})),
+            group_status=dict(track.get("group_status", {})),
+            preparation_warnings=list(track.get("warnings", [])),
         ))
     return results
 
@@ -181,6 +191,20 @@ def render_markdown_report(report: dict) -> str:
         sep = (entry.get("quality_report") or {}).get("separation_metrics") or {}
         for stem, value in (sep.get("sdr") or {}).items():
             lines.append(f"| {entry['track_id']} | {stem} | {_fmt(value)} |")
+
+    lines += ["", "## Reference completeness", "",
+              "Only `absent` groups count toward false notes on an absent instrument; "
+              "`missing_annotation` (audio, no MIDI) and `not_rendered` (MIDI, no audio) "
+              "mean the reference itself is incomplete.",
+              "", "| Track | vocals | drums | bass | other |", "|---|---|---|---|---|"]
+    for entry in report.get("reference_tracks", []):
+        status = entry.get("group_status") or {}
+        lines.append(f"| {entry['track_id']} | " + " | ".join(
+            status.get(g, "-") for g in ("vocals", "drums", "bass", "other")) + " |")
+    warning_lines = [f"- `{entry['track_id']}`: {w}"
+                     for entry in report.get("reference_tracks", [])
+                     for w in entry.get("preparation_warnings") or []]
+    lines += ["", "### Preparation warnings", ""] + (warning_lines or ["_None._"])
 
     lines += ["", "## Real-track spot checks (no ground truth \u2014 manual review)", ""]
     spotcheck = report.get("manual_spotcheck") or []
