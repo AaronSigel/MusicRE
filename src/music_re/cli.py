@@ -26,7 +26,9 @@ def cmd_slice(file: Path, start: float = typer.Option(0, '--start', '-s'),
               end: Optional[float] = typer.Option(None, '--end', '-e'),
               out: Optional[Path] = typer.Option(None, '--out', '-o')):
     """Extract an audio segment."""
-    out = out or file.with_name(f'{file.stem}_slice_{int(start)}_{int(end or 0)}{file.suffix}')
+    start_str = f"{start:g}"
+    end_str = f"{end:g}" if end is not None else "0"
+    out = out or file.with_name(f'{file.stem}_slice_{start_str}_{end_str}{file.suffix}')
     console.print(f'Saved slice to: {slice_audio(file, out, start_sec=start, end_sec=end)}')
 
 

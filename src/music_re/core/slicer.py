@@ -19,6 +19,9 @@ def slice_audio(
     if not in_p.is_file():
         raise FileNotFoundError(f"Input audio file not found: {in_p}")
 
+    if in_p == out_p:
+        raise ValueError("output_path cannot be identical to input_path")
+
     if start_sec < 0:
         raise ValueError(f"start_sec cannot be negative: {start_sec}")
 

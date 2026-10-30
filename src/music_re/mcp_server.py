@@ -23,7 +23,9 @@ mcp = FastMCP("music-re")
 async def slice_audio(file_path: str, start_sec: float, end_sec: float) -> str:
     """Extract a segment from an audio file to save compute time and memory."""
     in_p = Path(file_path).resolve()
-    out_p = in_p.with_name(f"{in_p.stem}_slice_{int(start_sec)}_{int(end_sec)}{in_p.suffix}")
+    start_str = f"{start_sec:g}"
+    end_str = f"{end_sec:g}"
+    out_p = in_p.with_name(f"{in_p.stem}_slice_{start_str}_{end_str}{in_p.suffix}")
     res = core_slice_audio(in_p, out_p, start_sec=start_sec, end_sec=end_sec)
     return str(res)
 
