@@ -44,6 +44,7 @@ class TranscriberBackend(ABC):
         save_raw: bool = True,
         grid_subdivisions: int = 4,
         quantize_ends: bool = True,
+        stem_name: Optional[str] = None,
     ) -> TranscriptionResult:
         """Transcribe audio stem to MIDI file, with optional timeline synchronization and raw preservation."""
         pass

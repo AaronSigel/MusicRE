@@ -15,8 +15,18 @@ from music_re.schemas import MusicalTimeline, TranscriptionResult
 class BasicPitchTranscriber(TranscriberBackend):
     """Tonal polyphonic transcriber wrapping Spotify Basic Pitch with dynamic timeline snapping."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        onset_threshold: float = 0.5,
+        frame_threshold: float = 0.3,
+        minimum_note_length: float = 127.7,
+        min_velocity: int = 25,
+    ):
         super().__init__(backend_name="basic_pitch", mode="tonal")
+        self.onset_threshold = onset_threshold
+        self.frame_threshold = frame_threshold
+        self.minimum_note_length = minimum_note_length
+        self.min_velocity = min_velocity
 
     def transcribe(
         self,
@@ -28,6 +38,7 @@ class BasicPitchTranscriber(TranscriberBackend):
         save_raw: bool = True,
         grid_subdivisions: int = 4,
         quantize_ends: bool = True,
+        stem_name: Optional[str] = None,
     ) -> TranscriptionResult:
         build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
         in_p = Path(audio_path).resolve()
@@ -40,6 +51,15 @@ class BasicPitchTranscriber(TranscriberBackend):
         effective_bpm = timeline.bpm if timeline and timeline.bpm > 0 else bpm
         if effective_bpm <= 0:
             effective_bpm = 120.0
+
+        if stem_name == "other":
+            onset_thresh = 0.65
+            frame_thresh = 0.45
+            min_note_len = 180.0
+        else:
+            onset_thresh = self.onset_threshold
+            frame_thresh = self.frame_threshold
+            min_note_len = self.minimum_note_length
 
         from basic_pitch.inference import predict_and_save
         from basic_pitch import build_icassp_2022_model_path, FilenameSuffix
@@ -58,6 +78,9 @@ class BasicPitchTranscriber(TranscriberBackend):
                     save_notes=False,
                     model_or_model_path=model_to_use,
                     midi_tempo=effective_bpm,
+                    onset_threshold=onset_thresh,
+                    frame_threshold=frame_thresh,
+                    minimum_note_length=min_note_len,
                 )
 
             generated_midis = list(tmp_dir_path.glob("*.mid"))
@@ -67,6 +90,15 @@ class BasicPitchTranscriber(TranscriberBackend):
             raw_midi = generated_midis[0]
 
             pm = pretty_midi.PrettyMIDI(str(raw_midi), initial_tempo=effective_bpm)
+
+            # Post-filter MIDI notes: remove velocity < min_velocity or duration < 0.08s
+            min_duration = 0.08
+            for inst in pm.instruments:
+                inst.notes = [
+                    n for n in inst.notes
+                    if n.velocity >= self.min_velocity and (n.end - n.start) >= min_duration
+                ]
+
             raw_pm = copy.deepcopy(pm) if save_raw else None
 
             if quantize:

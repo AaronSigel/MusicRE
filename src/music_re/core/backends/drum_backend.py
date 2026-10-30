@@ -26,6 +26,7 @@ class DrumTranscriber(TranscriberBackend):
         save_raw: bool = True,
         grid_subdivisions: int = 4,
         quantize_ends: bool = True,
+        stem_name: Optional[str] = None,
     ) -> TranscriptionResult:
         build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
         parameters = dict(grid_subdivisions=grid_subdivisions, quantize_ends=quantize_ends)

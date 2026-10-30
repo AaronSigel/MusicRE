@@ -201,7 +201,7 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                             transcriber = get_transcriber_backend(mode='tonal')
                         result = transcriber.transcribe(stem, midi_dir / f'{name}.mid', timeline=timeline, bpm=bpm,
                                                          save_raw=settings.save_raw, grid_subdivisions=settings.grid_subdivisions,
-                                                         quantize_ends=settings.quantize_ends)
+                                                         quantize_ends=settings.quantize_ends, stem_name=name)
                         results[name] = result.model_dump()
                         midis[name] = result.midi_path
                         # Persist individual successes to resume after later failures.
