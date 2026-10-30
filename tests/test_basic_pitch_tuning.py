@@ -12,6 +12,7 @@ def test_basic_pitch_transcriber_defaults():
     assert t.frame_threshold == 0.3
     assert t.minimum_note_length == 127.7
     assert t.min_velocity == 25
+    assert t.include_pitch_bends is False
 
 
 def test_basic_pitch_transcriber_custom_params():

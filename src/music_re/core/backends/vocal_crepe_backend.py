@@ -23,11 +23,13 @@ class CrepeVocalTranscriber(TranscriberBackend):
         device: str = "auto",
         hop_length_ms: float = 10.0,
         periodicity_threshold: float = 0.25,
+        max_pitch_bend: int = 4096,
     ):
         super().__init__(backend_name="crepe_vocal", mode="tonal")
         self.device = "cuda" if device in ("auto", "cuda") and torch.cuda.is_available() else "cpu"
         self.hop_length_ms = hop_length_ms
         self.periodicity_threshold = periodicity_threshold
+        self.max_pitch_bend = max_pitch_bend
 
     def transcribe(
         self,
@@ -114,9 +116,13 @@ class CrepeVocalTranscriber(TranscriberBackend):
                         continue
                     f0_note = pretty_midi.hz_to_note_number(f0)
                     semitone_diff = f0_note - note.pitch
-                    pb_val = int(np.clip(np.round(semitone_diff * 4096.0 / 2.0), -8192, 8191))
+                    # Clamp continuous pitch bend range to ±100 cents / musical vibrato (max ±4096)
+                    pb_val = int(np.clip(np.round(semitone_diff * 4096.0 / 2.0), -self.max_pitch_bend, self.max_pitch_bend))
                     t = float(times[idx])
                     inst.pitch_bends.append(pretty_midi.PitchBend(pitch=pb_val, time=t))
+
+                # Reset pitch bend to 0 at note end so vibrato does not leak into subsequent notes
+                inst.pitch_bends.append(pretty_midi.PitchBend(pitch=0, time=round(note.end, 6)))
 
             inst.pitch_bends.sort(key=lambda pb: pb.time)
 
@@ -142,6 +148,7 @@ class CrepeVocalTranscriber(TranscriberBackend):
                 device=self.device,
                 hop_length_ms=self.hop_length_ms,
                 periodicity_threshold=self.periodicity_threshold,
+                max_pitch_bend=self.max_pitch_bend,
                 model="crepe_tiny",
             ),
         )

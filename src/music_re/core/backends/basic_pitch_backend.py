@@ -23,6 +23,7 @@ class BasicPitchTranscriber(TranscriberBackend):
         minimum_note_length: float = 127.7,
         min_velocity: int = 25,
         suppress_reverb: bool = False,
+        include_pitch_bends: bool = False,
     ):
         super().__init__(backend_name="basic_pitch", mode="tonal")
         self.onset_threshold = onset_threshold
@@ -30,6 +31,7 @@ class BasicPitchTranscriber(TranscriberBackend):
         self.minimum_note_length = minimum_note_length
         self.min_velocity = min_velocity
         self.suppress_reverb = suppress_reverb
+        self.include_pitch_bends = include_pitch_bends
 
     def transcribe(
         self,
@@ -43,6 +45,7 @@ class BasicPitchTranscriber(TranscriberBackend):
         quantize_ends: bool = True,
         stem_name: Optional[str] = None,
         suppress_reverb: Optional[bool] = None,
+        include_pitch_bends: Optional[bool] = None,
     ) -> TranscriptionResult:
         build_quantize_grid(grid_subdivisions=grid_subdivisions, max_duration=0)
         in_p = Path(audio_path).resolve()
@@ -113,12 +116,23 @@ class BasicPitchTranscriber(TranscriberBackend):
             pm = pretty_midi.PrettyMIDI(str(raw_midi), initial_tempo=effective_bpm)
 
             # Post-filter MIDI notes: remove velocity < filter_min_vel or duration < 0.08s
+            # By default or for non-vocal stems, strip static/noisy pitch bends for exact 12-TET tuning
+            if include_pitch_bends is None:
+                if stem_name is not None and stem_name.lower() != "vocals":
+                    keep_pitch_bends = False
+                else:
+                    keep_pitch_bends = self.include_pitch_bends
+            else:
+                keep_pitch_bends = include_pitch_bends
+
             min_duration = 0.08
             for inst in pm.instruments:
                 inst.notes = [
                     n for n in inst.notes
                     if n.velocity >= filter_min_vel and (n.end - n.start) >= min_duration
                 ]
+                if not keep_pitch_bends:
+                    inst.pitch_bends = []
 
             raw_pm = copy.deepcopy(pm) if save_raw else None
 

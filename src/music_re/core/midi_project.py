@@ -1,6 +1,7 @@
+import bisect
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 import numpy as np
 import pretty_midi
 
@@ -123,5 +124,166 @@ def build_combined_midi_project(
         stem_instrument.control_changes.sort(key=lambda cc: cc.time)
         combined_pm.instruments.append(stem_instrument)
 
+    # Post-process non-drum instruments: normalize pitch bends and resolve harmonic clashes
+    for inst in combined_pm.instruments:
+        if not inst.is_drum:
+            normalize_instrument_pitch_bends(inst)
+
+    resolve_harmonic_dissonance(combined_pm.instruments)
+
+    for inst in combined_pm.instruments:
+        if not inst.is_drum:
+            deduplicate_overlapping_notes(inst)
+            normalize_instrument_pitch_bends(inst)
+
     combined_pm.write(str(out_p))
     return out_p
+
+
+def normalize_instrument_pitch_bends(instrument: pretty_midi.Instrument) -> None:
+    """Ensure pitch bend resets to 0 at note endings and strip static tuning detune."""
+    if not instrument.pitch_bends:
+        return
+
+    # Check for static detune (multiple pitch bends all stuck at identical non-zero value, e.g. constant 1365 = +33 cents)
+    pb_vals = {pb.pitch for pb in instrument.pitch_bends}
+    if len(instrument.pitch_bends) >= 2 and len(pb_vals) == 1 and 0 not in pb_vals:
+        logger.info("Stripping static pitch bend (%d) on %s", next(iter(pb_vals)), instrument.name)
+        instrument.pitch_bends = []
+        return
+
+    if not instrument.notes:
+        return
+
+    instrument.pitch_bends.sort(key=lambda pb: pb.time)
+    pb_times = [pb.time for pb in instrument.pitch_bends]
+    existing_times = set(pb_times)
+    new_resets = []
+
+    for note in instrument.notes:
+        idx = bisect.bisect_right(pb_times, note.end) - 1
+        if idx >= 0:
+            last_pb = instrument.pitch_bends[idx]
+            if last_pb.pitch != 0:
+                t = round(note.end, 6)
+                if t not in existing_times:
+                    new_resets.append(pretty_midi.PitchBend(pitch=0, time=t))
+                    existing_times.add(t)
+
+    if new_resets:
+        instrument.pitch_bends.extend(new_resets)
+        instrument.pitch_bends.sort(key=lambda pb: pb.time)
+
+
+def resolve_harmonic_dissonance(instruments: List[pretty_midi.Instrument]) -> None:
+    """Resolve minor 2nd (1-semitone) clashes between simultaneous notes across non-drum stems."""
+    non_drum_insts = [inst for inst in instruments if not inst.is_drum]
+    if len(non_drum_insts) < 2:
+        return
+
+    STEM_PRIORITY = {
+        "vocals": 5,
+        "bass": 4,
+        "piano": 3,
+        "guitar": 2,
+        "other": 1,
+    }
+
+    max_passes = 4
+    for _ in range(max_passes):
+        clash_resolved = False
+
+        for i in range(len(non_drum_insts)):
+            for j in range(i + 1, len(non_drum_insts)):
+                inst_a = non_drum_insts[i]
+                inst_b = non_drum_insts[j]
+                prio_a = STEM_PRIORITY.get(inst_a.name.lower(), 2)
+                prio_b = STEM_PRIORITY.get(inst_b.name.lower(), 2)
+
+                remove_a = set()
+                remove_b = set()
+
+                for n_a in inst_a.notes:
+                    if id(n_a) in remove_a:
+                        continue
+                    for n_b in inst_b.notes:
+                        if id(n_b) in remove_b:
+                            continue
+
+                        # Check time overlap
+                        overlap_start = max(n_a.start, n_b.start)
+                        overlap_end = min(n_a.end, n_b.end)
+                        if (overlap_end - overlap_start) <= 0.03:
+                            continue
+
+                        # Check 1-semitone clash (minor 2nd)
+                        if abs(n_a.pitch - n_b.pitch) != 1:
+                            continue
+
+                        # Compare strengths
+                        dur_a = n_a.end - n_a.start
+                        dur_b = n_b.end - n_b.start
+                        score_a = (n_a.velocity / 127.0) * min(dur_a, 2.0) + (prio_a * 0.05)
+                        score_b = (n_b.velocity / 127.0) * min(dur_b, 2.0) + (prio_b * 0.05)
+
+                        if score_a >= score_b:
+                            dom_n, clash_n = n_a, n_b
+                            dom_inst, clash_inst = inst_a, inst_b
+                            is_b_clash = True
+                        else:
+                            dom_n, clash_n = n_b, n_a
+                            dom_inst, clash_inst = inst_b, inst_a
+                            is_b_clash = False
+
+                        clash_dur = clash_n.end - clash_n.start
+
+                        # Filter ghost overtones: lower velocity (< 55), short (< 0.20s), or significantly weaker
+                        if (
+                            clash_n.velocity < 55
+                            or clash_dur < 0.20
+                            or clash_n.velocity <= 0.75 * dom_n.velocity
+                            or clash_dur <= 0.60 * (dom_n.end - dom_n.start)
+                        ):
+                            logger.info(
+                                "Harmonic dissonance: filtered ghost overtone pitch %d (vel=%d, dur=%.2fs) on %s clashing with pitch %d on %s",
+                                clash_n.pitch, clash_n.velocity, clash_dur, clash_inst.name,
+                                dom_n.pitch, dom_inst.name,
+                            )
+                            if is_b_clash:
+                                remove_b.add(id(clash_n))
+                            else:
+                                remove_a.add(id(clash_n))
+                        else:
+                            # Nudge clashing note pitch to unison with dominant note to avoid dissonance
+                            old_pitch = clash_n.pitch
+                            clash_n.pitch = dom_n.pitch
+                            logger.info(
+                                "Harmonic dissonance: nudged clashing note pitch %d -> %d on %s to resolve clash with %s",
+                                old_pitch, clash_n.pitch, clash_inst.name, dom_inst.name,
+                            )
+
+                        clash_resolved = True
+
+                if remove_a:
+                    inst_a.notes = [n for n in inst_a.notes if id(n) not in remove_a]
+                if remove_b:
+                    inst_b.notes = [n for n in inst_b.notes if id(n) not in remove_b]
+
+        if not clash_resolved:
+            break
+
+
+def deduplicate_overlapping_notes(inst: pretty_midi.Instrument) -> None:
+    """Merge overlapping notes with identical pitch on the same instrument."""
+    if not inst.notes:
+        return
+    inst.notes.sort(key=lambda n: (n.pitch, n.start))
+    merged = []
+    for note in inst.notes:
+        if merged and merged[-1].pitch == note.pitch and note.start < merged[-1].end:
+            merged[-1].end = max(merged[-1].end, note.end)
+            merged[-1].velocity = max(merged[-1].velocity, note.velocity)
+        else:
+            merged.append(note)
+    merged.sort(key=lambda n: (n.start, n.pitch))
+    inst.notes = merged
