@@ -32,3 +32,13 @@
 
 - Validator tests: `uv run --locked pytest tests/test_midi_validator.py -q` — 15 passed.
 - Full suite: `uv run --locked pytest -m "not models and not real_e2e and not dataset" -q` — 408 passed, 4 deselected, 13 warnings.
+
+## Fix round 1
+
+- Added a regression test showing piano filter evidence must match audit evidence and remain nonzero; it failed against fabricated zero evidence.
+- Supported filter audit-only roles now compute real features and retain `unscored`; output remains byte-copied.
+- Drums are special-cased before role rules; drums and unsupported stems avoid audio decoding while still parsing MIDI.
+- Added rich MIDI round-trip coverage: 480 PPQ, tempo, time/key signatures, lyrics, CC7, pitch bend, two instruments, and duplicate notes.
+- Added quiet A1 at amplitude `0.003` and harmonic low E1 keep cases.
+- Validator tests: `uv run --locked pytest tests/test_midi_validator.py -q` — 19 passed.
+- Full suite: `uv run --locked pytest -m "not models and not real_e2e and not dataset" -q` — 412 passed, 4 deselected, 13 warnings.

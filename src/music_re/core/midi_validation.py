@@ -71,7 +71,6 @@ class SpectralMidiValidator:
         midi = pretty_midi.PrettyMIDI(str(midi_path))
         instruments = midi.instruments
         notes_flat = [(inst, note) for inst in instruments for note in inst.notes]
-        y = load_mono(audio_path, self.config.spectral.sr)
         rule = self.config.rule_for(stem_name)
         if stem_name == 'drums':
             status, decision = 'skipped', 'skipped'
@@ -84,7 +83,8 @@ class SpectralMidiValidator:
         if mode == 'audit' or (rule is None or not rule.filter_enabled or stem_name == 'drums'):
             if mode == 'filter':
                 shutil.copyfile(midi_path, out_midi_path)
-            if mode == 'audit' and rule is not None:
+            if rule is not None and stem_name != 'drums':
+                y = load_mono(audio_path, self.config.spectral.sr)
                 features = compute_stem_features(y, self.config.spectral)
                 evidence = [compute_note_evidence(features, n.pitch, n.start, n.end, n.velocity)
                             for _, n in notes_flat]
@@ -98,6 +98,7 @@ class SpectralMidiValidator:
             return self._report(stem_name, mode, status, midi_path,
                                 out_midi_path if mode == 'filter' else None, evidence,
                                 [warning] if rule is None and stem_name != 'drums' else [])
+        y = load_mono(audio_path, self.config.spectral.sr)
         features = compute_stem_features(y, self.config.spectral)
         evidence = []
         rejected = set()

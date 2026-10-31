@@ -134,6 +134,74 @@ def test_audit_only_roles_never_reject_wrong_pitch_in_filter_mode(tmp_path, stem
     assert len(pretty_midi.PrettyMIDI(str(tmp_path / 'out.mid')).instruments[0].notes) == 1
 
 
+def test_piano_filter_evidence_matches_audit_and_is_nonzero(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = _midi(tmp_path / 'piano.mid', [_note(69)])
+    validator = SpectralMidiValidator()
+    audit = validator.validate(audio, midi, 'piano', 'audit')
+    filtered = validator.validate(audio, midi, 'piano', 'filter', tmp_path / 'copy.mid')
+    assert filtered.notes[0].harmonic_support == audit.notes[0].harmonic_support > 0
+    assert filtered.notes[0].temporal_persistence == audit.notes[0].temporal_persistence > 0
+
+
+def test_rich_midi_filter_preserves_non_note_events_instruments_and_duplicates(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = pretty_midi.PrettyMIDI(resolution=480, initial_tempo=100)
+    midi.time_signature_changes.append(pretty_midi.TimeSignature(3, 4, 0))
+    midi.key_signature_changes.append(pretty_midi.KeySignature(2, 0))
+    midi.lyrics.append(pretty_midi.Lyric('preserve me', 0.2))
+    first = pretty_midi.Instrument(program=32, name='Bass')
+    first.notes = [_note(69), _note(69), _note(60)]
+    first.control_changes.append(pretty_midi.ControlChange(7, 99, 0.15))
+    first.pitch_bends.append(pretty_midi.PitchBend(128, 0.25))
+    second = pretty_midi.Instrument(program=40, name='Second')
+    second.notes = [_note(69)]
+    midi.instruments.extend([first, second])
+    source_path = tmp_path / 'rich.mid'
+    midi.write(str(source_path))
+    source = pretty_midi.PrettyMIDI(str(source_path))
+    out = tmp_path / 'rich-out.mid'
+    SpectralMidiValidator().validate(audio, source_path, 'bass', 'filter', out)
+    result = pretty_midi.PrettyMIDI(str(out))
+    assert result.resolution == source.resolution == 480
+    assert result.get_tempo_changes() == source.get_tempo_changes()
+    assert [(x.numerator, x.denominator, x.time) for x in result.time_signature_changes] == [
+        (x.numerator, x.denominator, x.time) for x in source.time_signature_changes]
+    assert [(x.key_number, x.time) for x in result.key_signature_changes] == [
+        (x.key_number, x.time) for x in source.key_signature_changes]
+    assert [(x.text, x.time) for x in result.lyrics] == [(x.text, x.time) for x in source.lyrics]
+    assert len(result.instruments) == len(source.instruments) == 2
+    for actual, expected in zip(result.instruments, source.instruments):
+        assert (actual.program, actual.name, actual.is_drum) == (
+            expected.program, expected.name, expected.is_drum)
+        assert [(x.number, x.value, x.time) for x in actual.control_changes] == [
+            (x.number, x.value, x.time) for x in expected.control_changes]
+        assert [(x.pitch, x.time) for x in actual.pitch_bends] == [
+            (x.pitch, x.time) for x in expected.pitch_bends]
+    assert [n.pitch for n in result.instruments[0].notes] == [69, 69]
+    assert [n.pitch for n in result.instruments[1].notes] == [69]
+
+
+@pytest.mark.parametrize('pitch,frequency', [(33, 55.0), (28, 41.203)])
+def test_quiet_a1_and_harmonic_low_e1_are_kept(tmp_path, pitch, frequency):
+    if pitch == 33:
+        audio = _audio(tmp_path / 'a.wav', (frequency,))
+        # Match the requested quiet fundamental amplitude.
+        sr = 22050
+        t = np.arange(sr) / sr
+        sf.write(audio, (0.003 * np.sin(2 * np.pi * frequency * t)).astype(np.float32), sr)
+    else:
+        sr = 22050
+        t = np.arange(sr) / sr
+        y = sum((np.sin(2 * np.pi * frequency * harmonic * t) / harmonic
+                 for harmonic in range(1, 6))).astype(np.float32)
+        audio = tmp_path / 'a.wav'
+        sf.write(audio, y, sr)
+    midi = _midi(tmp_path / 'low.mid', [_note(pitch)])
+    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', tmp_path / 'out.mid')
+    assert report.notes[0].decision == 'keep'
+
+
 @pytest.mark.parametrize('mode,out_path', [
     ('filter', None),
     ('filter', 'same'),
