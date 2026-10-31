@@ -219,6 +219,9 @@ def cmd_deconstruct(file: Path,
                                                  help='Execution profile (fast, balanced, quality, dense, six_stems).'),
                      separator_backend: str = typer.Option('demucs', '--separator-backend',
                                                            click_type=click.Choice(['demucs', 'scnet'], case_sensitive=False)),
+                      spectral_validation: str = typer.Option('off', '--spectral-validation',
+                                                              click_type=click.Choice(['off', 'audit', 'filter'], case_sensitive=False),
+                                                              help='Spectral MIDI validation mode (off, audit, filter).'),
                      cache_root: Optional[Path] = typer.Option(None, '--cache-root'),
                      as_json: bool = typer.Option(False, '--json')):
     """Run the shared resumable pipeline. Use --six-stems / -6 (or profile 'dense' / 'six_stems') for complex tracks with guitar and piano."""
@@ -230,6 +233,7 @@ def cmd_deconstruct(file: Path,
             kwargs['separator_backend'] = separator_backend
         result = run_pipeline(file, workspace=WorkspaceManager(cache_root=cache_root), six_stems=six_stems,
                               device=device, profile=profile,
+                              spectral_validation=spectral_validation.lower(),
                               progress_callback=None if as_json else console.print, **kwargs)
     except Exception as e:
         Console(stderr=True).print(f'[red]Pipeline failed:[/red] {e}')

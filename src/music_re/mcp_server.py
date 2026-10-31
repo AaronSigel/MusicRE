@@ -191,6 +191,7 @@ async def deconstruct_full_pipeline(
     device: str = "auto",
     profile: str = "balanced",
     cache_root: Optional[str] = None,
+    spectral_validation: str = "off",
 ) -> Dict[str, Any]:
     """End-to-end pipeline: separate stems, analyze acoustic features, extract timeline, transcribe to MIDI, and assemble project."""
     p = Path(file_path).resolve()
@@ -199,7 +200,8 @@ async def deconstruct_full_pipeline(
         ws = WorkspaceManager(cache_root=cache_root)
         with ws.lock(p):
             return run_pipeline(p, workspace=ws,
-                                six_stems=six_stems, device=device, profile=profile)
+                                six_stems=six_stems, device=device, profile=profile,
+                                spectral_validation=spectral_validation)
 
     return await asyncio.to_thread(_run)
 
