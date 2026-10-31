@@ -573,6 +573,8 @@ def main():
     if args._worker:
         print(WORKER_RESULT_PREFIX + json.dumps(worker_main(json.loads(args._worker)), default=str), flush=True)
         return
+    if args.reuse_cache and not Path(args.reuse_cache).is_dir():
+        build_parser().error(f"--reuse-cache {args.reuse_cache} is not an existing directory")
 
     raw_dir = Path(args.slakh_raw_dir)
     prepared_dir = Path(args.prepared_dir)

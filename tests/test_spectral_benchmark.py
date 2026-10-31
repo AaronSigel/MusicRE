@@ -203,6 +203,7 @@ def test_main_reuses_requested_cache_and_records_it(tmp_path, monkeypatch):
     roots = []
     monkeypatch.setattr(bench, 'run_spectral_ab', lambda tracks, root, modes, **k: roots.append(root) or [])
     cache = tmp_path / 'existing-cache'
+    cache.mkdir()
     monkeypatch.setattr(sys, 'argv', ['bench', '--slakh-raw-dir', str(raw), '--reuse-cache', str(cache),
                                      '--spectral-validation', 'off', 'audit', '--out-json', 'out.json',
                                      '--out-md', 'out.md', '--history-dir', 'history'])
@@ -249,3 +250,22 @@ def test_per_stem_not_measured_when_any_paired_run_unscored():
     tracks = [_track('a', filter=_run(per_stem={'bass': .8})), _track('b', off=unscored, filter=unscored)]
     acc = bench.summarize_spectral_ab(tracks, ['off', 'filter'])['comparisons']['filter']['acceptance']
     assert acc['per_stem']['status'] == 'NOT_MEASURED'
+
+
+@pytest.mark.parametrize('kind', ['missing', 'file'])
+def test_main_rejects_reuse_cache_that_is_not_a_directory(tmp_path, monkeypatch, capsys, kind):
+    raw = tmp_path / 'raw'
+    (raw / 'Track00001').mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    prepared = []
+    monkeypatch.setattr(bench, 'prepare_track', lambda d, out: prepared.append(d))
+    cache = tmp_path / 'no-such-cache'
+    if kind == 'file':
+        cache.write_text('')
+    monkeypatch.setattr(sys, 'argv', ['bench', '--slakh-raw-dir', str(raw), '--reuse-cache', str(cache),
+                                     '--out-json', 'out.json', '--out-md', 'out.md', '--history-dir', 'history'])
+    with pytest.raises(SystemExit) as exc:
+        bench.main()
+    assert exc.value.code != 0
+    assert f'--reuse-cache {cache} is not an existing directory' in capsys.readouterr().err
+    assert prepared == [] and not (tmp_path / 'out.json').exists()
