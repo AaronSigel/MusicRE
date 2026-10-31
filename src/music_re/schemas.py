@@ -99,3 +99,38 @@ class MidiDigest(BaseModel):
     total_notes: int
     bars_analyzed: str    # e.g. "1-8"
     notes: List[NoteEvent]
+
+
+class NoteEvidence(BaseModel):
+    pitch: int
+    start_sec: float
+    end_sec: float
+    velocity: int
+    harmonic_support: float
+    spectral_contrast: float
+    temporal_persistence: float
+    onset_agreement: float
+    leakage: float
+    note_score: Optional[float] = None
+    decision: Literal['unscored', 'keep', 'reject', 'uncertain', 'skipped', 'unsupported'] = 'unscored'
+    reason: Optional[str] = None
+
+
+class StemValidationReport(BaseModel):
+    stem: str
+    mode: Literal['audit', 'filter']
+    status: Literal['validated', 'skipped', 'unsupported', 'failed']
+    input_midi_path: str
+    output_midi_path: Optional[str] = None
+    notes: List[NoteEvidence] = Field(default_factory=list)
+    counts: Dict[str, int] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+class SpectralValidationResult(BaseModel):
+    mode: Literal['off', 'audit', 'filter']
+    algo_version: str
+    config: Dict[str, Any]
+    stems: Dict[str, StemValidationReport]
+    active_variant: Literal['original', 'validated'] = 'original'
