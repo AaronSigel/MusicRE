@@ -152,3 +152,41 @@ def test_missing_prepared_reference_is_built_from_raw(tmp_path, monkeypatch):
     cs.collect_rows(cache_root, prepared, tmp_path / 'raw', ('bass',))
     assert calls == [(tmp_path / 'raw' / track, prepared / track)]
     assert json.loads((prepared / track / 'prepare_result.json').read_text())['octave_shift']['bass'] == -12
+
+
+def _ex(rel_db, support, label, split='tune', role='vocals'):
+    return cs.PresenceExample(source='x', item='i', role=role, split=split, label=label,
+                              rel_db=rel_db, median_support=support, active_fraction=0.0, n_notes=1)
+
+
+def test_presence_thresholds_never_mark_tune_present_absent_and_maximise_recall():
+    examples = [_ex(-10, .5, 'present'), _ex(-35, .05, 'present'), _ex(-20, .1, 'present'),
+                _ex(-40, .2, 'absent'), _ex(-45, .02, 'absent'), _ex(-30, .3, 'absent')]
+    rule = cs.choose_presence_thresholds(examples)
+    flags = [cs.is_absent(e, rule) for e in examples]
+    assert flags[:3] == [False, False, False]
+    assert sum(flags[3:]) == 2
+    assert flags[3] and flags[4]
+    # Conservative: midpoint between the caught absent values and the next observed value.
+    assert -40 < rule['min_rel_db'] <= -35
+    assert rule['min_median_support'] > .2
+
+
+def test_presence_thresholds_without_negatives_never_fire():
+    rule = cs.choose_presence_thresholds([_ex(-10, .5, 'present'), _ex(-20, .3, 'present')])
+    assert not any(cs.is_absent(_ex(r, s, 'absent'), rule) for r, s in [(-200, 0.0), (-50, .01)])
+
+
+def test_presence_metrics_count_false_absent_and_recall_per_split():
+    rule = {'min_rel_db': -30.0, 'min_median_support': .25}
+    examples = [_ex(-40, .1, 'present', 'test'), _ex(-40, .1, 'absent', 'test'),
+                _ex(-20, .1, 'absent', 'test'), _ex(-10, .5, 'present', 'tune')]
+    m = cs.presence_metrics(examples, rule)
+    assert m['test'] == dict(n_present=1, n_absent=2, false_absent=1, absent_detected=1, absent_recall=.5)
+    assert m['tune']['false_absent'] == 0 and m['tune']['absent_recall'] is None
+
+
+def test_label_musdb_clip_by_vocal_level():
+    assert cs.musdb_label(-30.0) == 'present'
+    assert cs.musdb_label(-45.0) is None
+    assert cs.musdb_label(-70.0) == 'absent'
