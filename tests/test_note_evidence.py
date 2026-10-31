@@ -25,23 +25,27 @@ def test_correct_and_wrong_pitch_evidence_is_finite(pitch):
 
 def test_correct_pitch_beats_wrong_pitch():
     correct, wrong = ev(tone([440]), 69), ev(tone([440]), 60)
+    assert correct.harmonic_support > 0.01
     assert correct.harmonic_support > wrong.harmonic_support
     assert correct.temporal_persistence > wrong.temporal_persistence
 
 
 def test_octave_error_has_higher_leakage():
     correct, octave = ev(tone([440]), 69), ev(tone([440]), 81)
+    assert octave.leakage > 0.01
     assert octave.leakage > correct.leakage
 
 
 def test_polyphonic_notes_both_have_support():
     mixture = tone([440, 523.25])
-    assert ev(mixture, 69).harmonic_support > 0.5
-    assert ev(mixture, 72).harmonic_support > 0.5
+    assert ev(mixture, 69).harmonic_support > 0.01
+    assert ev(mixture, 72).harmonic_support > 0.01
 
 
 def test_bass_55_hz_beats_58_27_hz_neighbor():
-    assert ev(tone([55]), 33).harmonic_support > ev(tone([58.27]), 33).harmonic_support
+    bass, neighbor = ev(tone([55]), 33), ev(tone([58.27]), 33)
+    assert bass.harmonic_support > 0.01
+    assert bass.harmonic_support > neighbor.harmonic_support
 
 
 def test_quiet_minus_40_db_preserves_feature_ordering():
@@ -70,6 +74,37 @@ def test_decaying_reverb_tail_has_lower_persistence():
     assert tail_note.temporal_persistence < sustained_note.temporal_persistence
 
 
+def test_remote_tone_does_not_change_local_spectral_contrast():
+    base = tone([440])
+    remote = base + tone([4000])
+    assert ev(base, 69).spectral_contrast == pytest.approx(ev(remote, 69).spectral_contrast, abs=0.05)
+
+
+def test_onset_peak_two_hops_before_note_start_is_included():
+    sr = 22050
+    hop = 256 / sr
+    start = 0.3
+    onset_time = start - 2 * hop
+    t = np.arange(sr) / sr
+    y = np.zeros(sr, np.float32)
+    active = t >= onset_time
+    y[active] = (0.2 * np.sin(2 * np.pi * 440 * t[active])).astype(np.float32)
+    features = compute_stem_features(y, SpectralConfig())
+    features.flux[:] = 0
+    onset_frame = int(round(onset_time / hop))
+    features.flux[onset_frame] = 1
+    note = compute_note_evidence(features, 69, start, 0.8)
+    assert note.harmonic_support > 0.01
+    assert note.onset_agreement == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(('start', 'end'), [(0.2, 0.2), (0.3, 0.2)])
+def test_invalid_duration_returns_zero_evidence(start, end):
+    note = ev(tone([440]), 69, start, end)
+    assert note.reason == 'invalid_duration'
+    assert all(getattr(note, field) == 0 for field in FEATURES)
+
+
 def test_broadband_onset_click_does_not_support_wrong_pitch():
     base = tone([440])
     clicked = base.copy()
@@ -94,8 +129,8 @@ def test_fully_out_of_range_note_has_reason_and_zero_features():
     assert all(getattr(note, field) == 0 for field in FEATURES)
 
 
-@pytest.mark.parametrize(('start', 'end'), [(0.2, 0.2), (0.2, 0.205)])
-def test_zero_length_and_sub_hop_notes_use_at_least_one_frame(start, end):
+def test_sub_hop_notes_use_at_least_one_frame():
+    start, end = 0.2, 0.205
     note = ev(tone([440]), 69, start, end)
     assert note.harmonic_support > 0
 

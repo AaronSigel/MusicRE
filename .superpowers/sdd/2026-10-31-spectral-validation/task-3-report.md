@@ -49,3 +49,20 @@ Observed values `(harmonic_support, spectral_contrast, temporal_persistence, lea
 - Polyphonic 440+523.25 Hz: A4 support `0.7889`, C5 support `0.7336`; both persistence `1.0`.
 - Reverb-like tail persistence `0.1143`; sustained A4 persistence `1.0`.
 - Silence and fully out-of-range window: all five features `0.0`; out-of-range reason `out_of_range`.
+
+## Fix round 1
+
+Changes per finding:
+
+1. Zero-length/reversed windows now return zero features with `reason='invalid_duration'`; positive sub-hop windows still use one frame. Updated tests accordingly.
+2. Fundamental evidence now normalizes CQT amplitude against note-window RMS; STFT harmonic prominence uses local spectral energy. This avoids normalization against strongest CQT bin.
+3. Cached per-pitch CQT tracks and stem-wide persistence thresholds on `StemSpectralFeatures`. Repeated notes of a pitch avoid rescanning full stem pitch tracks.
+4. Contrast background now uses nearby non-harmonic STFT bands within ±3 semitones around harmonics. Added remote 4 kHz tone invariance test.
+5. Onset search now reads full-stem flux within ±3 hops, including pre-start peaks, and compares against remaining note-window flux. Added a controlled peak two hops before note start.
+6. Strengthened comparative tests with positive evidence checks to prevent all-zero false passes.
+
+RED/GREEN and verification:
+
+- RED: `uv run --locked pytest tests/test_note_evidence.py -q` — 2 failed, 28 passed; invalid durations returned nonzero evidence. Subsequent failures exposed stale zero-length test expectation and thresholds tied to old normalization; corrected tests to match ruling.
+- GREEN: `uv run --locked pytest tests/test_note_evidence.py -q` — 29 passed.
+- Full suite: `uv run --locked pytest -m "not models and not real_e2e and not dataset" -q` — 392 passed, 4 deselected, 13 existing warnings.
