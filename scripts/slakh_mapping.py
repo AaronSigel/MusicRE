@@ -53,7 +53,7 @@ def estimate_octave_shift(audio: np.ndarray, sr: int, notes: list[pretty_midi.No
     duration = len(audio) / sr if sr else 0
     windows = [(min(max(0.0, duration - 10.0), i * max(0.0, duration - 10.0) / 5),
                 min(duration, 10.0 + i * max(0.0, duration - 10.0) / 5)) for i in range(6)]
-    windows = [(a, b) for a, b in windows if b > a]
+    windows = list(dict.fromkeys((a, b) for a, b in windows if b > a))
     histogram: Dict[int, int] = {}
     measured = 0
     visited = set()
@@ -62,18 +62,18 @@ def estimate_octave_shift(audio: np.ndarray, sr: int, notes: list[pretty_midi.No
         if len(segment) < 4096:
             continue
         f0, voiced, voiced_prob = librosa.pyin(segment, fmin=25, fmax=500, sr=sr,
-                                     frame_length=4096, hop_length=512)
-        times = librosa.times_like(f0, sr=sr, hop_length=512)
+                                               frame_length=4096, hop_length=256)
+        times = librosa.times_like(f0, sr=sr, hop_length=256)
         for note_index, note in enumerate(notes):
             if note_index in visited:
                 continue
             onset = max(note.start, start)
             offset = min(note.end, end)
-            trim_start = max(onset + .05, start)
+            trim_start = max(onset + min(.05, .3 * (note.end - note.start)), start)
             if offset <= trim_start:
                 continue
             mask = ((times >= trim_start - start) & (times <= offset - start) & voiced
-                    & (voiced_prob >= .6) & np.isfinite(f0))
+                    & (voiced_prob >= .1) & np.isfinite(f0))
             values = f0[mask]
             if len(values) < 3:
                 continue

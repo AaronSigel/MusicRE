@@ -26,6 +26,20 @@ def test_estimate_octave_shift_detects_audio_one_octave_below_midi():
     assert diagnostics['measured'] >= 8 and diagnostics['agreement'] >= .6
 
 
+def test_estimate_octave_shift_detects_staccato_bass_one_octave_low():
+    import numpy as np
+    notes = [pretty_midi.Note(velocity=100, pitch=48, start=i * .15, end=i * .15 + .1) for i in range(10)]
+    t = np.arange(SR * 2) / SR
+    audio = np.zeros_like(t)
+    for note in notes:
+        active = (t >= note.start) & (t < note.end)
+        audio[active] = sum((.2 / h) * np.sin(2 * np.pi * 65.406 * h * t[active])
+                            for h in range(1, 4))
+    shift, diagnostics = estimate_octave_shift(audio, SR, notes)
+    assert shift == -12
+    assert diagnostics['measured'] >= 8
+
+
 def test_estimate_octave_shift_returns_zero_for_matching_noise_and_few_notes():
     import numpy as np
     notes = [pretty_midi.Note(velocity=100, pitch=48, start=i, end=i + .5) for i in range(8)]
@@ -35,6 +49,20 @@ def test_estimate_octave_shift_returns_zero_for_matching_noise_and_few_notes():
     assert estimate_octave_shift(np.random.default_rng(1).normal(0, .1, SR * 9), SR, notes)[0] == 0
     shift, diagnostics = estimate_octave_shift(audio, SR, notes[:2])
     assert shift == 0 and diagnostics['measured'] < 8
+
+
+def test_estimate_octave_shift_deduplicates_short_track_windows(monkeypatch):
+    import librosa
+    import numpy as np
+    calls = []
+
+    def fake_pyin(*args, **kwargs):
+        calls.append(1)
+        return np.array([np.nan]), np.array([False]), np.array([0.0])
+
+    monkeypatch.setattr(librosa, 'pyin', fake_pyin)
+    estimate_octave_shift(np.zeros(SR), SR, [])
+    assert len(calls) == 1
 
 
 def _write_fake_slakh_track(track_dir: Path, stems, duration_sec: float = 1.0):
