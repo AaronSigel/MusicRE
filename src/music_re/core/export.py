@@ -11,7 +11,7 @@ import soundfile as sf
 from music_re.core.dawproject_export import export_dawproject as generate_dawproject
 from music_re.core.profiles import resolve_profile
 from music_re.schemas import MusicalTimeline, QualityReport, TranscriptionResult
-from music_re.workspace import compute_file_content_hash
+from music_re.workspace import compute_file_content_hash, active_midis
 
 
 def validate_bundle(workspace, file_path, profile='balanced'):
@@ -22,17 +22,22 @@ def validate_bundle(workspace, file_path, profile='balanced'):
     if manifest.run_config.get('profile') != profile:
         errors.append('execution/export profile mismatch or missing execution profile')
     required_stages = {'separation', 'analysis', 'structure', 'transcription'}
+    if manifest.spectral_validation is not None or manifest.active_midi_variant == 'validated':
+        required_stages.add('spectral_validation')
     if settings.evaluate:
         required_stages.add('evaluation')
     if manifest.status != 'completed' or not required_stages.issubset(manifest.completed_stages):
         errors.append('pipeline stages not completed')
     names = {'vocals', 'bass', 'drums', 'other'} | ({'guitar', 'piano'} if settings.six_stems else set())
-    if set(manifest.stems) != names or set(manifest.midis) != names | {'all_stems'}:
+    midis = active_midis(manifest)
+    if set(manifest.stems) != names or set(midis) != names | {'all_stems'}:
         errors.append('active stem/MIDI sets do not match model configuration')
     files = {}
     for role in names:
         files[f'stems/{role}.wav'] = manifest.stems.get(role)
-        files[f'midis/{role}.mid'] = manifest.midis.get(role)
+        files[f'midis/{role}.mid'] = midis.get(role)
+        if manifest.active_midi_variant == 'validated':
+            files[f'midis_original/{role}.mid'] = manifest.midis.get(role)
         try:
             result = TranscriptionResult(**manifest.transcription_results[role])
             if result.midi_path != manifest.midis.get(role):
@@ -44,9 +49,13 @@ def validate_bundle(workspace, file_path, profile='balanced'):
         except Exception as e:
             errors.append(f'{role}: invalid transcription result: {e}')
     root = workspace.get_track_dir(file_path)
-    files.update({'midis/all_stems.mid': manifest.midis.get('all_stems'),
+    files.update({'midis/all_stems.mid': midis.get('all_stems'),
                   'timeline.json': workspace.get_timeline_path(file_path),
                   'metadata.json': root / 'metadata.json'})
+    if manifest.active_midi_variant == 'validated':
+        files['midis_original/all_stems.mid'] = manifest.midis.get('all_stems')
+    if manifest.spectral_validation is not None:
+        files['spectral_validation.json'] = workspace.get_spectral_validation_path(file_path)
     if settings.evaluate:
         files['quality_report.json'] = workspace.get_quality_report_path(file_path)
     for destination, source in files.items():
@@ -62,7 +71,12 @@ def validate_bundle(workspace, file_path, profile='balanced'):
                 pm = pretty_midi.PrettyMIDI(str(path))
                 role = Path(destination).stem
                 if role in manifest.transcription_results:
-                    if sum(len(i.notes) for i in pm.instruments) != manifest.transcription_results[role]['note_count']:
+                    if manifest.active_midi_variant == 'validated' and destination.startswith('midis/'):
+                        notes = manifest.spectral_validation['stems'][role]['notes']
+                        expected = sum(note['decision'] != 'reject' for note in notes)
+                    else:
+                        expected = manifest.transcription_results[role]['note_count']
+                    if sum(len(i.notes) for i in pm.instruments) != expected:
                         raise ValueError('MIDI note count disagrees with result')
             elif destination == 'timeline.json':
                 MusicalTimeline.model_validate_json(path.read_text())
@@ -125,10 +139,12 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
         portable['input_file'] = source.name
         portable['stems'] = {name: f'stems/{name}.wav' for name in manifest.stems}
         portable['midis'] = {name: f'midis/{name}.mid' for name in manifest.midis}
+        if manifest.active_midi_variant == 'validated':
+            portable['validated_midis'] = dict(portable['midis'])
         if export_dawproject:
             portable['dawproject'] = f'{source.stem}.dawproject'
         for name, result in portable['transcription_results'].items():
-            result['midi_path'] = f'midis/{name}.mid'
+            result['midi_path'] = f"{'midis_original' if manifest.active_midi_variant == 'validated' else 'midis'}/{name}.mid"
             result['raw_midi_path'] = f'midis/{name}_raw.mid' if profile != 'fast' else None
         portable['artifact_hashes'] = {'bundle': {relative: compute_file_content_hash(staged / relative) for relative in files}}
         if export_dawproject:
@@ -149,4 +165,3 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
 
 
 export_dawproject = generate_dawproject
-

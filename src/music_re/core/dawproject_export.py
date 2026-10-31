@@ -34,7 +34,7 @@ from dawproject import (
 )
 
 from music_re.schemas import MusicalTimeline
-from music_re.workspace import WorkspaceManager
+from music_re.workspace import WorkspaceManager, active_midis
 
 
 class EmbeddedFiles(dict):
@@ -107,7 +107,7 @@ def export_dawproject(
         embedded_files.append(stem_path.read_bytes(), rel_audio_path)
 
     # 2. MIDI tracks and clips
-    midis = getattr(manifest, "midis", {}) or {}
+    midis = active_midis(manifest)
     for role, midi_file in midis.items():
         midi_path = Path(midi_file)
         if not midi_path.is_file():

@@ -2,6 +2,7 @@
 import hashlib
 import json
 import random
+import shutil
 from importlib.metadata import version
 from pathlib import Path
 
@@ -15,14 +16,15 @@ from music_re.core.backends import get_structure_analyzer, get_transcriber_backe
 from music_re.core.backends.separator_base import resolve_device
 from music_re.core.chords import detect_chords_for_bars
 from music_re.core.midi_project import build_combined_midi_project
+from music_re.core.midi_validation import SpectralMidiValidator, SpectralValidatorConfig, SPECTRAL_ALGO_VERSION
 from music_re.core.profiles import resolve_profile
 from music_re.core.provenance import model_inventory
 from music_re.core.quality import evaluate_quality
 from music_re.core.separator import separate_stems
-from music_re.schemas import BarChord
-from music_re.workspace import WorkspaceManager, compute_file_content_hash
+from music_re.schemas import BarChord, SpectralValidationResult
+from music_re.workspace import WorkspaceManager, compute_file_content_hash, active_midis, _atomic_write_json
 
-STAGES = ['separation', 'analysis', 'structure', 'transcription', 'evaluation']
+STAGES = ['separation', 'analysis', 'structure', 'transcription', 'spectral_validation', 'evaluation']
 
 
 def _fingerprint(value):
@@ -33,6 +35,18 @@ def _hashes(paths):
     return {str(path): compute_file_content_hash(path) for path in paths}
 
 
+def _fingerprints(source, config, packages, weights, mode, validator_config):
+    previous = compute_file_content_hash(source)
+    fingerprints = {}
+    for stage in STAGES:
+        if stage == 'spectral_validation':
+            value = [stage, previous, mode, validator_config.to_dict(), SPECTRAL_ALGO_VERSION]
+        else:
+            value = [stage, previous, config, packages, weights, 'corrective-v3']
+        previous = fingerprints[stage] = _fingerprint(value)
+    return fingerprints
+
+
 def _valid(paths, hashes):
     try:
         return bool(paths) and all(Path(p).is_file() and hashes.get(str(p)) == compute_file_content_hash(p) for p in paths)
@@ -41,7 +55,9 @@ def _valid(paths, hashes):
 
 
 def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', profile='balanced',
-                 progress_callback=None, separator_backend='demucs') -> dict:
+                 progress_callback=None, separator_backend='demucs', spectral_validation: str = 'off') -> dict:
+    if spectral_validation not in ('off', 'audit', 'filter'):
+        raise ValueError('invalid spectral_validation mode')
     settings = resolve_profile(profile, six_stems)
     resolved_device = resolve_device(device)
     source = Path(file_path).resolve()
@@ -64,11 +80,8 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
         torch.manual_seed(settings.seed)
         ws.update_manifest(source, status='processing', run_config=config, runtime=runtime)
         # Fingerprints include effective settings, library versions and upstream stages.
-        previous = compute_file_content_hash(source)
-        fingerprints = {}
-        for stage in STAGES:
-            fingerprints[stage] = _fingerprint([stage, previous, config, packages, runtime['weights'], 'corrective-v3'])
-            previous = fingerprints[stage]
+        validator_config = SpectralValidatorConfig()
+        fingerprints = _fingerprints(source, config, packages, runtime['weights'], spectral_validation, validator_config)
 
         stage = 'separation'
         try:
@@ -88,9 +101,11 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                     'analysis': [root / 'metadata.json'],
                     'structure': [ws.get_timeline_path(source)],
                     'transcription': list(manifest.midis.values()) + [v['raw_midi_path'] for v in manifest.transcription_results.values() if v.get('raw_midi_path')],
+                    'spectral_validation': ([] if spectral_validation == 'off' else
+                                            [ws.get_spectral_validation_path(source)] + list(manifest.validated_midis.values())),
                     'evaluation': [ws.get_quality_report_path(source)],
                 }[stage]
-                if not changed and stage in manifest.completed_stages and _valid(paths, manifest.artifact_hashes.get(stage, {})):
+                if not changed and stage in manifest.completed_stages and ((stage == 'spectral_validation' and spectral_validation == 'off') or _valid(paths, manifest.artifact_hashes.get(stage, {}))):
                     if progress_callback:
                         progress_callback(f'Reusing {stage}.')
                     continue
@@ -221,6 +236,41 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                     ws.mark_stage_complete(source, stage, midis)
                     ws.update_manifest(source, transcription_results=results)
                     paths = list(midis.values()) + [v['raw_midi_path'] for v in results.values() if v.get('raw_midi_path')]
+                elif stage == 'spectral_validation':
+                    ws.invalidate_stages(source, [stage])
+                    report_path = ws.get_spectral_validation_path(source)
+                    midi_dir = ws.get_validated_midis_dir(source)
+                    if spectral_validation == 'off':
+                        if midi_dir.exists():
+                            shutil.rmtree(midi_dir)
+                        report_path.unlink(missing_ok=True)
+                        paths = []
+                        ws.mark_stage_complete(source, stage)
+                    else:
+                        if spectral_validation == 'filter':
+                            midi_dir.mkdir(parents=True, exist_ok=True)
+                        validator = SpectralMidiValidator(validator_config)
+                        reports, validated = {}, {}
+                        for name, midi in manifest.midis.items():
+                            if name == 'all_stems':
+                                continue
+                            output = midi_dir / f'{name}.mid' if spectral_validation == 'filter' else None
+                            reports[name] = validator.validate(manifest.stems[name], midi, name, spectral_validation, out_midi_path=output)
+                            if output is not None:
+                                validated[name] = str(output)
+                        if spectral_validation == 'filter':
+                            timeline = ws.load_timeline(source)
+                            bpm = timeline.bpm if timeline and timeline.bpm > 0 else (manifest.analysis or {}).get('bpm', 120)
+                            if bpm <= 0:
+                                bpm = 120.0
+                            validated['all_stems'] = str(build_combined_midi_project(validated, midi_dir / 'all_stems.mid', timeline=timeline, bpm=bpm))
+                        result = SpectralValidationResult(mode=spectral_validation, algo_version=SPECTRAL_ALGO_VERSION,
+                                                          config=validator_config.to_dict(), stems=reports,
+                                                          active_variant='validated' if validated else 'original').model_dump()
+                        _atomic_write_json(report_path, result)
+                        ws.update_manifest(source, validated_midis=validated, active_midi_variant=result['active_variant'], spectral_validation=result)
+                        ws.mark_stage_complete(source, stage)
+                        paths = [report_path] + list(validated.values())
                 else:
                     report = evaluate_quality(ws, source)
                     ws.save_quality_report(source, report)
@@ -232,12 +282,10 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
             # First-time downloads become known during inference. Bind every
             # completed stage to that final inventory, not the pre-download absence.
             m = ws.get_manifest(source)
-            previous = compute_file_content_hash(source)
+            final_fingerprints = _fingerprints(source, config, packages, runtime['weights'], spectral_validation, validator_config)
             for completed_stage in STAGES:
-                fingerprint = _fingerprint([completed_stage, previous, config, packages, runtime['weights'], 'corrective-v3'])
-                previous = fingerprint
                 if completed_stage in m.completed_stages:
-                    m.stage_fingerprints[completed_stage] = fingerprint
+                    m.stage_fingerprints[completed_stage] = final_fingerprints[completed_stage]
             m.status, m.current_stage, m.runtime = 'completed', 'completed', runtime
             ws.save_manifest(source, m)
         except Exception as e:
@@ -245,6 +293,7 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
             raise
         manifest = ws.get_manifest(source)
         return dict(workspace_dir=str(root), analysis=manifest.analysis, timeline=manifest.timeline,
-                    stems=manifest.stems, midis=manifest.midis,
+                    stems=manifest.stems, midis=manifest.midis, active_midis=active_midis(manifest),
+                    spectral_validation=manifest.spectral_validation,
                     quality_report=manifest.evaluation.get('report') if manifest.evaluation else None,
                     transcription_results=manifest.transcription_results, provenance=manifest.runtime)

@@ -11,6 +11,10 @@ from typing import Any, Dict, Iterator, Optional, Union
 from music_re.schemas import MusicalTimeline, QualityReport, WorkspaceManifest
 
 
+def active_midis(manifest: WorkspaceManifest) -> Dict[str, str]:
+    return manifest.validated_midis if manifest.active_midi_variant == 'validated' else manifest.midis
+
+
 def compute_file_content_hash(path: Union[str, Path], chunk_size: int = 64 * 1024) -> str:
     """Compute 16-character SHA256 hex digest by streaming the entire file."""
     p = Path(path).resolve()
@@ -146,6 +150,12 @@ class WorkspaceManager:
     def get_quality_report_path(self, file_path: Union[str, Path]) -> Path:
         return self.get_track_dir(file_path) / "quality_report.json"
 
+    def get_validated_midis_dir(self, file_path: Union[str, Path]) -> Path:
+        return self.get_track_dir(file_path) / 'midis_validated'
+
+    def get_spectral_validation_path(self, file_path: Union[str, Path]) -> Path:
+        return self.get_track_dir(file_path) / 'spectral_validation.json'
+
     def save_quality_report(self, file_path: Union[str, Path], report: QualityReport) -> Path:
         qr_path = self.get_quality_report_path(file_path)
         with self.lock(file_path):
@@ -222,17 +232,19 @@ class WorkspaceManager:
             if artifacts is not None:
                 if stage == "separation":
                     if manifest.stems != artifacts:
-                        manifest = self.invalidate_stages(file_path, ['analysis', 'structure', 'transcription', 'evaluation'])
+                        manifest = self.invalidate_stages(file_path, ['analysis', 'structure', 'transcription', 'spectral_validation', 'evaluation'])
                     manifest.stems = dict(artifacts)
                 elif stage == "analysis":
                     manifest.analysis = artifacts
                 elif stage == "structure":
                     if manifest.timeline != artifacts.get('timeline', artifacts):
-                        manifest = self.invalidate_stages(file_path, ['transcription', 'evaluation'])
+                        manifest = self.invalidate_stages(file_path, ['transcription', 'spectral_validation', 'evaluation'])
                     manifest.timeline = artifacts.get("timeline", artifacts)
                 elif stage == "evaluation":
                     manifest.evaluation = artifacts
                 elif stage == "transcription":
+                    if manifest.midis != artifacts and 'spectral_validation' in manifest.completed_stages:
+                        manifest = self.invalidate_stages(file_path, ['spectral_validation', 'evaluation'])
                     manifest.midis = dict(artifacts)
             if stage not in manifest.completed_stages:
                 manifest.completed_stages.append(stage)
@@ -245,6 +257,9 @@ class WorkspaceManager:
         """Invalidate active state without deleting user or historical artifacts."""
         with self.lock(file_path):
             manifest = self.get_manifest(file_path)
+            stages = list(stages)
+            if 'transcription' in stages and 'spectral_validation' not in stages:
+                stages.extend(['spectral_validation', 'evaluation'])
             for stage in stages:
                 manifest.completed_stages = [s for s in manifest.completed_stages if s != stage]
                 manifest.stage_fingerprints.pop(stage, None)
@@ -261,6 +276,10 @@ class WorkspaceManager:
                     manifest.transcription_results = {}
                 elif stage == 'evaluation':
                     manifest.evaluation = None
+                elif stage == 'spectral_validation':
+                    manifest.validated_midis = {}
+                    manifest.active_midi_variant = 'original'
+                    manifest.spectral_validation = None
             manifest.status = 'pending'
             self.save_manifest(file_path, manifest)
             return manifest

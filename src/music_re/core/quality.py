@@ -9,7 +9,7 @@ from music_re.core.audio_io import decode_audio
 from music_re.core.quality_audio import separation_quality
 from music_re.core.quality_midi import transcription_quality
 from music_re.schemas import QualityReport
-from music_re.workspace import WorkspaceManager
+from music_re.workspace import WorkspaceManager, active_midis
 
 
 def evaluate_quality(workspace: WorkspaceManager, file_path: Union[str, Path],
@@ -27,7 +27,7 @@ def evaluate_quality(workspace: WorkspaceManager, file_path: Union[str, Path],
                        rms_to_p10_amplitude_db=float(20 * np.log10(rms / p10)) if p10 > 0 else None)
     manifest = workspace.get_manifest(p)
     separation = separation_quality(y, sr, manifest.stems, ground_truth_stems)
-    transcription = transcription_quality(manifest.midis, ground_truth_midi)
+    transcription = transcription_quality(active_midis(manifest), ground_truth_midi)
     return QualityReport(is_objective=bool(separation['comparisons'] or transcription['comparisons']),
                          separation_metrics=separation, transcription_metrics=transcription,
                          audio_diagnostics=diagnostics, evaluated_at=datetime.now(timezone.utc).isoformat())

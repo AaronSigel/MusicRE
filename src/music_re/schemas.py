@@ -15,6 +15,9 @@ class WorkspaceManifest(BaseModel):
     timeline: Optional[Dict[str, Any]] = None
     evaluation: Optional[Dict[str, Any]] = None
     midis: Dict[str, str] = Field(default_factory=dict)
+    validated_midis: Dict[str, str] = Field(default_factory=dict)
+    active_midi_variant: Literal['original', 'validated'] = 'original'
+    spectral_validation: Optional[Dict[str, Any]] = None
     run_config: Dict[str, Any] = Field(default_factory=dict)
     runtime: Dict[str, Any] = Field(default_factory=dict)
     stage_fingerprints: Dict[str, str] = Field(default_factory=dict)
