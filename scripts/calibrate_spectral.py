@@ -22,7 +22,8 @@ Usage:
         --prepared-dir data/benchmarks/calibration/prepared \
         --out data/benchmarks/calibration/spectral_calibration.json
     uv run --locked python scripts/calibrate_spectral.py presence \
-        --slakh-cache data/benchmarks/cache/<run> --prepared-dir data/benchmarks/calibration/prepared \
+        --slakh-cache data/benchmarks/cache/<run> --raw-dir data/benchmarks/slakh_raw/raw \
+        --prepared-dir data/benchmarks/calibration/prepared \
         --musdb-dir data/benchmarks/musdb7 --musdb-cache data/benchmarks/calibration/musdb_cache \
         --out data/benchmarks/calibration/presence_calibration.json
 """
@@ -73,14 +74,31 @@ def is_tp(ref_by_pitch: dict, pitch: int, start: float) -> bool:
     return starts is not None and len(starts) > 0 and float(np.min(np.abs(starts - start))) <= ONSET_TOLERANCE_SEC
 
 
+def ensure_prepared(track: str, prepared_dir: Path, raw_dir: Path | None) -> dict:
+    """prepare_result of an octave-corrected prepared track, re-preparing it when needed.
+
+    A prepared dir counts as current only if prepare_result.json exists and records
+    octave_shift_by_source (written since the per-source bass octave fix). Older or
+    benchmark-prepared dirs are re-prepared from raw_dir, so labels never use a
+    pre-fix ground_truth.mid.
+    """
+    out_dir = Path(prepared_dir) / track
+    result_path = out_dir / 'prepare_result.json'
+    if result_path.is_file() and (out_dir / 'ground_truth.mid').is_file():
+        result = json.loads(result_path.read_text())
+        if 'octave_shift_by_source' in result:
+            return result
+    if raw_dir is None:
+        raise FileNotFoundError(f'{out_dir} has no current prepare_result.json (with octave_shift_by_source) '
+                                f'and no --raw-dir to prepare it from')
+    result = prepare_track(Path(raw_dir) / track, out_dir)
+    result_path.write_text(json.dumps(result, indent=2, default=str))
+    return result
+
+
 def _reference(track: str, prepared_dir: Path, raw_dir: Path | None) -> pretty_midi.PrettyMIDI:
-    path = prepared_dir / track / 'ground_truth.mid'
-    if not path.is_file():
-        if raw_dir is None:
-            raise FileNotFoundError(f'{path} missing and no --raw-dir to prepare it from')
-        result = prepare_track(Path(raw_dir) / track, prepared_dir / track)
-        (prepared_dir / track / 'prepare_result.json').write_text(json.dumps(result, indent=2, default=str))
-    return pretty_midi.PrettyMIDI(str(path))
+    ensure_prepared(track, prepared_dir, raw_dir)
+    return pretty_midi.PrettyMIDI(str(Path(prepared_dir) / track / 'ground_truth.mid'))
 
 
 def collect(cache_root, prepared_dir, raw_dir, roles):
@@ -365,14 +383,14 @@ def _example(source, item, role, split, label, presence, n_notes):
                            active_fraction=presence['active_fraction'], n_notes=n_notes)
 
 
-def slakh_presence_examples(cache_root, prepared_dir, roles=('vocals', 'bass', 'other')):
+def slakh_presence_examples(cache_root, prepared_dir, raw_dir=None, roles=('vocals', 'bass', 'other')):
     """Audit-mode presence features of cached BabySlakh stems (cache dirs are only read)."""
     validator = SpectralMidiValidator()
     examples = []
     for manifest_path in sorted(Path(cache_root).glob('*/*/manifest.json')):
         track = manifest_path.parent.parent.name
         manifest = json.loads(manifest_path.read_text())
-        status = json.loads((Path(prepared_dir) / track / 'prepare_result.json').read_text())['group_status']
+        status = ensure_prepared(track, prepared_dir, raw_dir)['group_status']
         split = 'tune' if track_in_split(track, 'tune') else 'test'
         for role in roles:
             label = {'present': 'present', 'absent': 'absent'}.get(status.get(role))
@@ -462,6 +480,8 @@ def presence_main(argv) -> int:
     parser = argparse.ArgumentParser(description='Calibrate the stem presence rule')
     parser.add_argument('--slakh-cache', required=True, type=Path)
     parser.add_argument('--prepared-dir', required=True, type=Path)
+    parser.add_argument('--raw-dir', type=Path, default=None,
+                        help='Slakh raw tracks, to (re)prepare dirs without a current prepare_result.json')
     parser.add_argument('--musdb-dir', type=Path, default=None)
     parser.add_argument('--musdb-cache', type=Path, default=Path('data/benchmarks/calibration/musdb_cache'))
     parser.add_argument('--profile', default='fast')
@@ -469,7 +489,7 @@ def presence_main(argv) -> int:
                         help='cap min_rel_db below the tune optimum (more conservative)')
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args(argv)
-    examples = slakh_presence_examples(args.slakh_cache, args.prepared_dir)
+    examples = slakh_presence_examples(args.slakh_cache, args.prepared_dir, args.raw_dir)
     levels = {}
     if args.musdb_dir is not None:
         musdb, levels = musdb_presence_examples(args.musdb_dir, args.musdb_cache, args.profile)

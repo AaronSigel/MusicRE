@@ -1,4 +1,5 @@
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -42,6 +43,9 @@ def _write_track(cache_root, prepared_dir, track, seed, invert=False, n=120):
     ref.instruments.append(inst)
     (prepared_dir / track).mkdir(parents=True)
     ref.write(str(prepared_dir / track / 'ground_truth.mid'))
+    (prepared_dir / track / 'prepare_result.json').write_text(json.dumps(
+        {'octave_shift': {'bass': 0}, 'octave_shift_by_source': {'bass': {'S00': 0}},
+         'group_status': {'bass': 'present', 'vocals': 'absent'}, 'warnings': []}))
     ws = cache_root / track / 'mix_abc'
     ws.mkdir(parents=True)
     report = {'mode': 'filter', 'algo_version': 'spectral-v1', 'config': {}, 'active_variant': 'validated',
@@ -134,24 +138,73 @@ def test_cli_writes_json_with_metrics_and_absolute_scores(tmp_path):
     assert {t['track'] for t in data['per_track']} == set(TUNE + TEST)
 
 
+def _fake_prepare(saved, calls):
+    def fake_prepare(track_dir, out_dir):
+        calls.append((Path(track_dir), Path(out_dir)))
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        (Path(out_dir) / 'ground_truth.mid').write_bytes(saved)
+        return {'octave_shift': {'bass': -12}, 'octave_shift_by_source': {'bass': {'S01': -12}},
+                'group_status': {'bass': 'present'}, 'warnings': []}
+    return fake_prepare
+
+
 def test_missing_prepared_reference_is_built_from_raw(tmp_path, monkeypatch):
     cache_root, prepared = _dataset(tmp_path)
     track = TUNE[0]
     saved = (prepared / track / 'ground_truth.mid').read_bytes()
-    (prepared / track / 'ground_truth.mid').unlink()
-    (prepared / track).rmdir()
+    shutil.rmtree(prepared / track)
     calls = []
-
-    def fake_prepare(track_dir, out_dir):
-        calls.append((Path(track_dir), Path(out_dir)))
-        Path(out_dir).mkdir(parents=True)
-        (Path(out_dir) / 'ground_truth.mid').write_bytes(saved)
-        return {'octave_shift': {'bass': -12}, 'warnings': []}
-
-    monkeypatch.setattr(cs, 'prepare_track', fake_prepare)
+    monkeypatch.setattr(cs, 'prepare_track', _fake_prepare(saved, calls))
     cs.collect_rows(cache_root, prepared, tmp_path / 'raw', ('bass',))
     assert calls == [(tmp_path / 'raw' / track, prepared / track)]
     assert json.loads((prepared / track / 'prepare_result.json').read_text())['octave_shift']['bass'] == -12
+
+
+@pytest.mark.parametrize('stale', [None, {'octave_shift': {'bass': 0}, 'warnings': []}])
+def test_pre_fix_prepared_reference_is_reprepared(tmp_path, monkeypatch, stale):
+    cache_root, prepared = _dataset(tmp_path)
+    track = TUNE[0]
+    saved = (prepared / track / 'ground_truth.mid').read_bytes()
+    result_path = prepared / track / 'prepare_result.json'
+    if stale is None:
+        result_path.unlink()
+    else:
+        result_path.write_text(json.dumps(stale))
+    calls = []
+    monkeypatch.setattr(cs, 'prepare_track', _fake_prepare(saved, calls))
+    cs.collect_rows(cache_root, prepared, tmp_path / 'raw', ('bass',))
+    assert calls == [(tmp_path / 'raw' / track, prepared / track)]
+    assert 'octave_shift_by_source' in json.loads(result_path.read_text())
+
+
+def test_pre_fix_prepared_reference_without_raw_dir_fails(tmp_path):
+    cache_root, prepared = _dataset(tmp_path)
+    (prepared / TUNE[0] / 'prepare_result.json').unlink()
+    with pytest.raises(FileNotFoundError, match='octave_shift_by_source'):
+        cs.collect_rows(cache_root, prepared, None, ('bass',))
+
+
+def test_slakh_presence_prepares_benchmark_prepared_dirs(tmp_path, monkeypatch):
+    track = TUNE[0]
+    cache, prepared = tmp_path / 'cache', tmp_path / 'prepared'
+    ws = cache / track / 'mix_abc'
+    ws.mkdir(parents=True)
+    (ws / 'manifest.json').write_text(json.dumps(
+        {'input_file': 'mix.wav', 'stems': {'bass': 'bass.wav'}, 'midis': {'bass': 'bass.mid'}}))
+    # Benchmark-prepared dir: ground truth but no prepare_result.json.
+    (prepared / track).mkdir(parents=True)
+    (prepared / track / 'ground_truth.mid').write_bytes(b'')
+    calls = []
+    monkeypatch.setattr(cs, 'prepare_track', _fake_prepare(b'', calls))
+
+    class Report:
+        presence = dict(rel_db=-10.0, median_support=.5, active_fraction=.9, verdict=None)
+        notes = []
+
+    monkeypatch.setattr(cs.SpectralMidiValidator, 'validate', lambda self, *a, **k: Report())
+    examples = cs.slakh_presence_examples(cache, prepared, tmp_path / 'raw', roles=('bass',))
+    assert calls == [(tmp_path / 'raw' / track, prepared / track)]
+    assert [(e.item, e.role, e.label) for e in examples] == [(track, 'bass', 'present')]
 
 
 def _ex(rel_db, support, label, split='tune', role='vocals'):
