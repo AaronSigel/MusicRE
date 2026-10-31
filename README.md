@@ -130,6 +130,30 @@ Export requires a completed, valid active artifact set. Its profile must match t
 
 Diagnostics are not accuracy scores. `rms_to_p10_amplitude_db` is an amplitude-distribution statistic, **not SNR**. Undefined dB values are `null`. Reference separation uses fixed source order, whole-track BSSEval v4 frames at 22,050 Hz, no source permutation, and rejects mismatched shapes. Pitched transcription uses 50 ms onset tolerance, 50 cents pitch tolerance, and optional offsets within 20% or 50 ms. GM drums are scored separately by onset and pitch, without offsets.
 
+## Spectral MIDI validation
+
+The optional `spectral_validation` stage runs after transcription and checks each transcribed note against the stem audio (STFT/CQT harmonic support, spectral contrast, temporal persistence, onset agreement, leakage). It uses NumPy, SciPy and Librosa only: no extra models, no GPU.
+
+```bash
+uv run --locked music-re deconstruct song.wav --profile balanced --spectral-validation audit
+```
+
+MCP `deconstruct_full_pipeline` takes the same `spectral_validation` argument. Values are case-insensitive.
+
+| Mode | What it does |
+| --- | --- |
+| `off` (default) | Stage does nothing. Pipeline output is unchanged. |
+| `audit` | Computes per-note evidence and writes `spectral_validation.json`. MIDI files stay byte-identical. Every note is `unscored`. |
+| `filter` | **Experimental.** Also writes filtered MIDI to `midis_validated/` (per stem plus `all_stems.mid`). Originals in `midis/` are never touched. Evaluation, export and DAWproject use the filtered set. |
+
+Filter rules: a note is rejected only when both harmonic support and temporal persistence fall below per-role thresholds; uncertain notes are kept. Only `bass`, `guitar` and `other` are filtered. `piano` and `vocals` stay audit-only, `drums` are never filtered, and unknown stems pass through with a warning. The thresholds are **not yet calibrated** against benchmark data, and `note_score` stays `null` until they are. Do not treat `filter` as an accuracy improvement until the Slakh A/B (`scripts/run_quality_benchmarks.py --spectral-validation off audit filter --split test`) shows one.
+
+Workspace artifacts: `spectral_validation.json` holds the full per-note report. The manifest keeps only a summary (mode, algorithm version, active MIDI variant, report path, per-stem status/counts/warnings). In filter mode an exported bundle puts the filtered MIDI in `midis/` and the originals in `midis_original/`. Changing the mode or validator settings reruns only `spectral_validation` and `evaluation`; separation, analysis, structure and transcription are reused from cache.
+
+Related change: chord detection now computes one whole-track chroma pass and slices it per bar, instead of a CQT per bar. Chord labels may differ slightly at bar boundaries.
+
+Known limit: feature extraction is chunked, but the retained per-stem magnitude spectrogram grows linearly with duration, about 42 MiB per minute per stem. A 10-minute track can add several hundred MiB of peak RAM.
+
 ## Verification
 
 CI runs the locked CPU suite without downloaded-weight tests. Run those explicitly with `uv run --locked pytest -m models -q`. Real-model acceptance requires FFmpeg, model downloads, an MP3 whose use is permitted, and separate CLI/MCP caches; it is not established by synthetic or mocked tests. See `docs/verification/` for executed evidence and limitations.
