@@ -76,8 +76,15 @@ def test_decaying_reverb_tail_has_lower_persistence():
 
 def test_remote_tone_does_not_change_local_spectral_contrast():
     base = tone([440])
-    remote = base + tone([4000])
-    assert ev(base, 69).spectral_contrast == pytest.approx(ev(remote, 69).spectral_contrast, abs=0.05)
+    remote = base + tone([4000], gain=20.0)
+    assert ev(base, 69).spectral_contrast == pytest.approx(ev(remote, 69).spectral_contrast, abs=0.005)
+
+
+def test_short_zero_flux_note_has_zero_onset_agreement():
+    features = compute_stem_features(tone([440]), SpectralConfig())
+    features.flux[:] = 0
+    note = compute_note_evidence(features, 69, 0.2, 0.24)
+    assert note.onset_agreement == 0
 
 
 def test_onset_peak_two_hops_before_note_start_is_included():

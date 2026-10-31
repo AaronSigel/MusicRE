@@ -66,3 +66,13 @@ RED/GREEN and verification:
 - RED: `uv run --locked pytest tests/test_note_evidence.py -q` — 2 failed, 28 passed; invalid durations returned nonzero evidence. Subsequent failures exposed stale zero-length test expectation and thresholds tied to old normalization; corrected tests to match ruling.
 - GREEN: `uv run --locked pytest tests/test_note_evidence.py -q` — 29 passed.
 - Full suite: `uv run --locked pytest -m "not models and not real_e2e and not dataset" -q` — 392 passed, 4 deselected, 13 existing warnings.
+
+## Fix round 2
+
+- Replaced full-stem onset timestamp search and mask allocation with arithmetic frame indexing and bounded flux slices.
+- Empty note-window background now yields onset agreement `1.0` only when nearby flux is positive; zero-flux short notes return `0.0`.
+- Tightened remote-tone contrast test to a 20-amplitude 4 kHz interferer and `0.005` tolerance; local contrast remains stable.
+- Removed unused `pitch_energy`, `norm`, and full-spectrum `total` calculations; silence uses note-window RMS.
+- RED: `uv run --locked pytest tests/test_note_evidence.py -q` — 1 failed, 29 passed; zero-flux short note incorrectly returned onset agreement `1.0`.
+- GREEN: `uv run --locked pytest tests/test_note_evidence.py -q` — 30 passed.
+- Full suite: `uv run --locked pytest -m "not models and not real_e2e and not dataset" -q` — 393 passed, 4 deselected, 13 existing warnings.

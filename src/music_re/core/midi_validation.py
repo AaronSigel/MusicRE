@@ -46,7 +46,7 @@ def compute_note_evidence(
     f0 = midi_to_hz(pitch)
     mag = features.stft_mag[:, frames]
     freqs = features.stft_freqs
-    # Integrate narrow fundamental/harmonic bands, then normalize by window spectral energy.
+    # Integrate narrow fundamental and harmonic bands.
     harmonic = np.zeros(len(frames), dtype=np.float64)
     fundamental = np.zeros(len(frames), dtype=np.float64)
     harmonic_presence = np.zeros(len(frames), dtype=np.float64)
@@ -63,11 +63,7 @@ def compute_note_evidence(
                 fundamental = band
     harmonic_presence /= 4.0
     cqt = np.mean(features.cqt_mag[cqt_idx][:, frames], axis=0) if cqt_in_range else fundamental
-    pitch_energy = np.maximum(cqt, fundamental)
-    total = np.sum(mag, axis=0) + 1e-12
-    # Compare expected energy with total energy in each representation.
-    norm = np.max(total)
-    if norm <= 1e-10:
+    if np.max(features.rms[frames]) <= 1e-10:
         return NoteEvidence(pitch=pitch, start_sec=start_sec, end_sec=end_sec,
                             velocity=velocity, reason=reason, **zero)
     if cqt_in_range:
@@ -108,16 +104,18 @@ def compute_note_evidence(
     leakage = max((v - expected) / (v + expected + 1e-12) for v in neighbor_energy)
     leakage = max(0.0, leakage)
     flux = features.flux
-    onset_idx = int(np.argmin(np.abs(features.times - start_sec)))
+    onset_idx = int(np.clip(round(start_sec / hop), 0, len(flux) - 1))
     window = 3
-    near_mask = np.zeros(len(flux), dtype=bool)
-    near_mask[max(0, onset_idx-window):min(len(flux), onset_idx+window+1)] = True
-    near = flux[near_mask]
-    elsewhere = features.flux[frames]
-    if len(elsewhere):
-        elsewhere_times = np.arange(len(features.times))[frames]
-        elsewhere = flux[frames][np.abs(elsewhere_times - onset_idx) > window]
-    onset = float(np.max(near)) / (float(np.max(elsewhere)) + 1e-12) if near.size and elsewhere.size else (1.0 if near.size else 0.0)
+    near = flux[max(0, onset_idx-window):min(len(flux), onset_idx+window+1)]
+    elsewhere_max = 0.0
+    left_end = min(hi, onset_idx - window)
+    if lo < left_end:
+        elsewhere_max = max(elsewhere_max, float(np.max(flux[lo:left_end])))
+    right_start = max(lo, onset_idx + window + 1)
+    if right_start < hi:
+        elsewhere_max = max(elsewhere_max, float(np.max(flux[right_start:hi])))
+    near_max = float(np.max(near)) if near.size else 0.0
+    onset = near_max / (elsewhere_max + 1e-12) if elsewhere_max > 0 else (1.0 if near_max > 0 else 0.0)
     return NoteEvidence(pitch=pitch, start_sec=start_sec, end_sec=end_sec, velocity=velocity,
                         harmonic_support=_bounded(support), spectral_contrast=_bounded(contrast),
                         temporal_persistence=_bounded(persistence), onset_agreement=_bounded(onset),
