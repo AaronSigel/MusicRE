@@ -1,9 +1,65 @@
 from pathlib import Path
 from dataclasses import replace
+from types import SimpleNamespace
 
+import numpy as np
+import pretty_midi
 import pytest
+import soundfile as sf
 
 from test_shared_pipeline import pipeline_env
+
+
+@pytest.fixture
+def tonal_pipeline_env(pipeline_env, monkeypatch):
+    from music_re.core.backends.transcriber_base import save_transcription
+
+    pipeline, ws, source, counts = pipeline_env
+    separate = pipeline.separate_stems
+    get_backend = pipeline.get_transcriber_backend
+
+    def tonal_separate(*args, **kwargs):
+        result = separate(*args, **kwargs)
+        sr = 44100
+        tone = .5 * np.sin(2 * np.pi * 110 * np.arange(sr * 2) / sr)
+        tone[sr:] = 0
+        sf.write(result.stems['bass'], tone, sr)
+        return result
+
+    def backend(**kwargs):
+        original = get_backend(**kwargs)
+
+        def transcribe(audio_path, output_midi_path, **options):
+            if options['stem_name'] != 'bass':
+                return original.transcribe(audio_path, output_midi_path, **options)
+            counts['transcription'] += 1
+            midi = pretty_midi.PrettyMIDI()
+            instrument = pretty_midi.Instrument(program=0)
+            instrument.notes = [pretty_midi.Note(velocity=100, pitch=45, start=.1, end=.75),
+                                pretty_midi.Note(velocity=100, pitch=80, start=1.25, end=1.75)]
+            midi.instruments.append(instrument)
+            return save_transcription(midi, output_midi_path, midi if options['save_raw'] else None, 'fake', {})
+
+        return SimpleNamespace(transcribe=transcribe)
+
+    monkeypatch.setattr(pipeline, 'separate_stems', tonal_separate)
+    monkeypatch.setattr(pipeline, 'get_transcriber_backend', backend)
+    return pipeline_env
+
+
+@pytest.fixture
+def stage_calls(pipeline_env, monkeypatch):
+    pipeline = pipeline_env[0]
+    calls = {'analysis': 0, 'evaluation': 0}
+    for attribute, key in [('analyze_audio', 'analysis'), ('evaluate_quality', 'evaluation')]:
+        original = getattr(pipeline, attribute)
+
+        def spy(*args, _original=original, _key=key, **kwargs):
+            calls[_key] += 1
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(pipeline, attribute, spy)
+    return calls
 
 
 def test_off_keeps_original_artifacts(pipeline_env):
@@ -25,14 +81,8 @@ def test_invalid_mode_does_not_write_manifest(pipeline_env):
     assert list(ws.cache_root.iterdir()) == []
 
 
-def test_modes_and_cache_isolation(pipeline_env, monkeypatch):
+def test_modes_and_cache_isolation(pipeline_env, stage_calls):
     pipeline, ws, source, counts = pipeline_env
-    original_evaluate = pipeline.evaluate_quality
-    evaluations = []
-    def evaluate(*args):
-        evaluations.append(1)
-        return original_evaluate(*args)
-    monkeypatch.setattr(pipeline, 'evaluate_quality', evaluate)
     initial = pipeline.run_pipeline(source, workspace=ws, spectral_validation='off')
     original = {name: Path(path).read_bytes() for name, path in initial['midis'].items()}
     upstream = {name: ws.get_manifest(source).stage_fingerprints[name] for name in pipeline.STAGES[:4]}
@@ -47,7 +97,7 @@ def test_modes_and_cache_isolation(pipeline_env, monkeypatch):
         if mode == 'filter':
             assert set(manifest.validated_midis) == set(manifest.midis)
             assert all(Path(path).is_file() for path in manifest.validated_midis.values())
-    assert len(evaluations) == 4
+    assert stage_calls == {'analysis': 2, 'evaluation': 4}
 
 
 def test_corrupt_report_reruns_stage(pipeline_env, monkeypatch):
@@ -73,19 +123,28 @@ def test_validator_error_is_recorded(pipeline_env, monkeypatch):
     assert manifest.active_midi_variant == 'original'
 
 
-def test_filter_export_includes_both_midi_sets_and_report(pipeline_env, tmp_path):
-    from music_re.core.export import export_bundle
-    pipeline, ws, source, _ = pipeline_env
+def test_filter_export_includes_both_midi_sets_and_report(tonal_pipeline_env, tmp_path):
+    from music_re.core.export import export_bundle, validate_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
     pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
     manifest = ws.get_manifest(source)
+    validate_bundle(ws, source)
     target = export_bundle(ws, source, tmp_path / 'bundle')
     for name in manifest.midis:
         assert (target / 'midis' / f'{name}.mid').read_bytes() == Path(manifest.validated_midis[name]).read_bytes()
         assert (target / 'midis_original' / f'{name}.mid').read_bytes() == Path(manifest.midis[name]).read_bytes()
     assert (target / 'spectral_validation.json').is_file()
+    original = pretty_midi.PrettyMIDI(str(target / 'midis_original' / 'bass.mid'))
+    filtered = pretty_midi.PrettyMIDI(str(target / 'midis' / 'bass.mid'))
+    original_notes = [note for instrument in original.instruments for note in instrument.notes]
+    filtered_notes = [note for instrument in filtered.instruments for note in instrument.notes]
+    assert [note.pitch for note in original_notes] == [45, 80]
+    assert [note.pitch for note in filtered_notes] == [45]
+    notes = manifest.spectral_validation['stems']['bass']['notes']
+    assert len(filtered_notes) == sum(note['decision'] != 'reject' for note in notes)
 
 
-def test_config_change_only_reruns_spectral_and_evaluation(pipeline_env, monkeypatch):
+def test_config_change_only_reruns_spectral_and_evaluation(pipeline_env, monkeypatch, stage_calls):
     pipeline, ws, source, counts = pipeline_env
     pipeline.run_pipeline(source, workspace=ws, spectral_validation='audit')
     old = ws.get_manifest(source).stage_fingerprints.copy()
@@ -97,9 +156,10 @@ def test_config_change_only_reruns_spectral_and_evaluation(pipeline_env, monkeyp
     assert all(old[stage] == new[stage] for stage in pipeline.STAGES[:4])
     assert all(old[stage] != new[stage] for stage in pipeline.STAGES[4:])
     assert counts == dict(separation=1, structure=1, transcription=4)
+    assert stage_calls == {'analysis': 2, 'evaluation': 2}
 
 
-def test_legacy_manifest_reuses_upstream_fingerprints(pipeline_env):
+def test_legacy_manifest_reuses_upstream_fingerprints(pipeline_env, stage_calls):
     import json
     pipeline, ws, source, counts = pipeline_env
     pipeline.run_pipeline(source, workspace=ws)
@@ -118,6 +178,7 @@ def test_legacy_manifest_reuses_upstream_fingerprints(pipeline_env):
     manifest_path.write_text(json.dumps(raw))
     pipeline.run_pipeline(source, workspace=ws)
     assert counts == dict(separation=1, structure=1, transcription=4)
+    assert stage_calls == {'analysis': 2, 'evaluation': 2}
     assert 'spectral_validation' in ws.get_manifest(source).completed_stages
 
 
@@ -131,3 +192,58 @@ def test_failed_corrupt_report_revalidation_is_not_completed(pipeline_env, monke
     with pytest.raises(RuntimeError):
         pipeline.run_pipeline(source, workspace=ws, spectral_validation='audit')
     assert 'spectral_validation' not in ws.get_manifest(source).completed_stages
+
+
+def test_audit_report_contains_unscored_original_notes(tonal_pipeline_env):
+    from music_re.schemas import SpectralValidationResult
+    pipeline, ws, source, _ = tonal_pipeline_env
+    result = pipeline.run_pipeline(source, workspace=ws, spectral_validation='audit')
+    report = SpectralValidationResult.model_validate_json(ws.get_spectral_validation_path(source).read_text())
+    assert report.mode == 'audit'
+    assert report.active_variant == 'original'
+    assert result['active_midis'] == result['midis']
+    assert len(report.stems['bass'].notes) == 2
+    assert all(note.decision == 'unscored' for stem in report.stems.values() for note in stem.notes)
+
+
+def test_quality_uses_filtered_midis(tonal_pipeline_env, monkeypatch):
+    import music_re.core.quality as quality
+    pipeline, ws, source, _ = tonal_pipeline_env
+    actual = quality.transcription_quality
+    calls = []
+
+    def spy(midis, ground_truth):
+        calls.append(dict(midis))
+        return actual(midis, ground_truth)
+
+    monkeypatch.setattr(quality, 'transcription_quality', spy)
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    manifest = ws.get_manifest(source)
+    assert calls == [manifest.validated_midis]
+    assert manifest.evaluation['report']['transcription_metrics']['total_notes'] == 1
+
+
+def test_filter_dawproject_contains_validated_notes(tonal_pipeline_env, tmp_path):
+    from dawproject import DawProject
+    from music_re.core.export import export_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    target = export_bundle(ws, source, tmp_path / 'bundle', export_dawproject=True)
+    project = DawProject.load_project(str(target / 'song.dawproject'))
+    bass_lanes = [lane for lane in project.arrangement.lanes.lanes if lane.track.name == 'bass (MIDI)']
+    assert len(bass_lanes) == 1
+    assert [note.key for clip in bass_lanes[0].clips for note in clip.content.notes] == [45]
+
+
+def test_off_export_has_original_layout(pipeline_env, tmp_path):
+    from music_re.core.export import export_bundle
+    pipeline, ws, source, _ = pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='off')
+    target = export_bundle(ws, source, tmp_path / 'bundle')
+    files = {str(path.relative_to(target)) for path in target.rglob('*') if path.is_file()}
+    names = {'vocals', 'drums', 'bass', 'other'}
+    expected = {'manifest.json', 'timeline.json', 'metadata.json', 'quality_report.json', 'midis/all_stems.mid'}
+    expected |= {f'stems/{name}.wav' for name in names}
+    expected |= {f'midis/{name}.mid' for name in names}
+    expected |= {f'midis/{name}_raw.mid' for name in names}
+    assert files == expected
