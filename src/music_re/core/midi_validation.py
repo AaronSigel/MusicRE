@@ -16,7 +16,7 @@ from music_re.core.spectral import (SpectralConfig, StemSpectralFeatures,
 from music_re.schemas import NoteEvidence, StemValidationReport
 
 
-SPECTRAL_ALGO_VERSION = 'spectral-v1'
+SPECTRAL_ALGO_VERSION = 'spectral-v2'
 
 
 # Order of the inputs to the calibrated note score (scripts/calibrate_spectral.py).
@@ -104,7 +104,19 @@ def score_decision(rule: RoleRule, score: float, reason: Optional[str]) -> str:
 _DEFAULT_ROLES = (
     ('bass', RoleRule(True, .10, .20, .10, .20)),
     ('guitar', RoleRule(True, .10, .20, .10, .20)),
-    ('other', RoleRule(True, .06, .10, .10, .20)),
+    # Fitted by scripts/calibrate_spectral.py on the Slakh tune split (benchmark cache
+    # 20261031T122948223612, octave-corrected references). Bass keeps the threshold rule:
+    # its calibrated score lost 11% of test TPs (cap 2%).
+    ('other', RoleRule(
+        True, .06, .10, .10, .20,
+        score_weights=(-0.1073164721798026, 0.18584598420812792, 0.09455851036997381,
+                       0.5468716080373939, -0.1891921463719693, -0.05920147844021798),
+        score_bias=0.024125373814499373,
+        score_mean=(0.4846532206893725, 0.9494680549073412, 0.8900147971981125,
+                    0.8115185129425667, 0.07157978047790219, -0.937571259628061),
+        score_scale=(0.10863819537638837, 0.029523579900300453, 0.20134445264277767,
+                     0.2537749746799757, 0.15306162355760436, 0.641796602897982),
+        reject_below=0.23139222965527687, uncertain_below=0.3656961148276384)),
     ('piano', RoleRule(False, .20, .20, .45, .50)),
     ('vocals', RoleRule(False, .20, .20, .45, .50)),
 )
