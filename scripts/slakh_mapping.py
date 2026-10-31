@@ -160,6 +160,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
     group_notes: Dict[str, list] = {g: [] for g in GROUPS}
     group_note_counts: Dict[str, int] = {g: 0 for g in GROUPS}
     group_files: Dict[str, list] = {g: [] for g in GROUPS}
+    octave_shift_by_source: Dict[str, dict] = {g: {} for g in GROUPS}
     warnings: list = []
 
     for stem_id, info in metadata["stems"].items():
@@ -182,6 +183,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
             continue
         group_files[group].append((has_audio, has_midi))
 
+        y_mono = None
         if has_audio:
             y, _ = decode_audio(stem_wav, target_sr=sr, normalize_db=None)
             y_mono = y if y.ndim == 1 else y.mean(axis=1)
@@ -207,6 +209,18 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
 
         if has_midi:
             pm = pretty_midi.PrettyMIDI(str(stem_midi_path))
+            source_notes = [note for inst in pm.instruments for note in inst.notes]
+            if group == "bass":
+                shift = 0
+                diagnostics = {"measured": 0, "agreement": 0.0, "histogram": {}}
+                if y_mono is not None and source_notes:
+                    shift, diagnostics = estimate_octave_shift(y_mono, sr, source_notes)
+                octave_shift_by_source[group][stem_id] = shift
+                if shift:
+                    for note in source_notes:
+                        note.pitch = int(np.clip(note.pitch + shift, 0, 127))
+                    warnings.append(f"{stem_id} (bass): audio/MIDI octave mismatch detected ({shift:+d} semitones; "
+                                    f"{diagnostics['agreement']:.0%} agreement)")
             for inst in pm.instruments:
                 group_notes[group].extend(inst.notes)
                 group_note_counts[group] += len(inst.notes)
@@ -215,14 +229,11 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
 
     group_status = {g: _group_status(group_files[g]) for g in GROUPS}
     octave_shift = {g: 0 for g in GROUPS}
-    if group_notes["bass"] and "bass" in group_audio:
-        shift, diagnostics = estimate_octave_shift(group_audio["bass"], sr, group_notes["bass"])
-        octave_shift["bass"] = shift
-        if shift:
-            warnings.append(f"bass: audio/MIDI octave mismatch detected ({shift:+d} semitones; "
-                            f"{diagnostics['agreement']:.0%} agreement)")
-            for note in group_notes["bass"]:
-                note.pitch = int(np.clip(note.pitch + shift, 0, 127))
+    if octave_shift_by_source["bass"]:
+        counts = {}
+        for shift in octave_shift_by_source["bass"].values():
+            counts[shift] = counts.get(shift, 0) + 1
+        octave_shift["bass"] = max(counts, key=counts.get)
 
     gt_pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
     max_note_end = 0.0
@@ -267,5 +278,6 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
         "group_note_counts": group_note_counts,
         "group_status": group_status,
         "octave_shift": octave_shift,
+        "octave_shift_by_source": octave_shift_by_source,
         "warnings": warnings,
     }

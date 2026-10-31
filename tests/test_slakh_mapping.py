@@ -160,6 +160,36 @@ def test_prepare_track_transposes_only_bass_reference(tmp_path, monkeypatch):
     assert any("octave mismatch" in w for w in result["warnings"])
 
 
+def test_prepare_track_corrects_bass_octaves_per_source(tmp_path):
+    import numpy as np
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00022", stems=[
+        ("S01", "Bass", False, 33), ("S05", "Bass", False, 34),
+    ], duration_sec=9.0)
+    t = np.arange(int(SR * 9.0)) / SR
+    source_audio = []
+    for index, (stem_id, frequency) in enumerate((("S01", 130.813), ("S05", 261.626))):
+        notes = [pretty_midi.Note(velocity=100, pitch=60, start=i + .1, end=i + .8) for i in range(8)]
+        pm = pretty_midi.PrettyMIDI()
+        inst = pretty_midi.Instrument(program=33 + index)
+        inst.notes.extend(notes)
+        pm.instruments.append(inst)
+        pm.write(str(track_dir / "MIDI" / f"{stem_id}.mid"))
+        audio = np.zeros_like(t)
+        for note in notes:
+            active = (t >= note.start) & (t < note.end)
+            audio[active] = sum((.2 / h) * np.sin(2 * np.pi * frequency * h * t[active])
+                                for h in range(1, 4))
+        sf.write(str(track_dir / "stems" / f"{stem_id}.wav"), audio, SR)
+        source_audio.append(audio)
+    sf.write(str(track_dir / "mix.wav"), source_audio[0] + source_audio[1], SR)
+
+    result = prepare_track(track_dir, tmp_path / "prepared-sources")
+    reference = pretty_midi.PrettyMIDI(result["ground_truth_midi_path"])
+    assert result["octave_shift_by_source"]["bass"] == {"S01": -12, "S05": 0}
+    assert result["octave_shift"]["bass"] == -12
+    assert sorted(note.pitch for note in reference.instruments[0].notes) == [48] * 8 + [60] * 8
+
+
 def test_prepare_track_handles_missing_stem_audio_without_crashing(tmp_path):
     # Review I5: Slakh's metadata.yaml "audio_rendered" flag is unreliable
     # in practice (BabySlakh Track00020 marks every stem False yet ships
