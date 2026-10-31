@@ -172,6 +172,29 @@ def test_default_uncalibrated_roles_report_no_presence_verdict(tmp_path, role):
     assert report.presence['verdict'] is None
 
 
+def test_mix_is_decoded_once_per_validator(tmp_path, quiet, monkeypatch):
+    from music_re.core import midi_validation as mv
+    mix, stem = quiet
+    loads = []
+    original = mv.load_mono
+
+    def spy(path, sr):
+        loads.append(Path(path))
+        return original(path, sr)
+
+    monkeypatch.setattr(mv, 'load_mono', spy)
+    validator = SpectralMidiValidator(_config())
+    reports = [validator.validate(stem, _midi(tmp_path / f'{role}.mid'), role, 'audit', mix_audio_path=mix)
+               for role in ('vocals', 'bass', 'other')]
+    assert loads.count(Path(mix)) == 1
+    assert loads.count(Path(stem)) == 3
+    assert len({r.presence['rel_db'] for r in reports}) == 1
+    # A changed mix file at the same path is decoded again.
+    _tone(mix, 0.25, seconds=1.5)
+    validator.validate(stem, _midi(tmp_path / 'v.mid'), 'vocals', 'audit', mix_audio_path=mix)
+    assert loads.count(Path(mix)) == 2
+
+
 def test_presence_rule_rejects_non_finite():
     with pytest.raises(ValueError):
         PresenceRule(float('nan'), .1)

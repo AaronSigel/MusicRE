@@ -231,6 +231,18 @@ def stem_presence(stem: np.ndarray, mix: Optional[np.ndarray], evidence, config:
 class SpectralMidiValidator:
     def __init__(self, config: SpectralValidatorConfig = SpectralValidatorConfig()):
         self.config = config
+        self._mix_cache = None  # (key, samples) of the last decoded source mix
+
+    def _load_mix(self, mix_audio_path) -> Optional[np.ndarray]:
+        """Decode the source mix once per validator; every stem of a track shares it."""
+        if mix_audio_path is None:
+            return None
+        path = Path(mix_audio_path).resolve()
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size, self.config.spectral.sr)
+        if self._mix_cache is None or self._mix_cache[0] != key:
+            self._mix_cache = (key, load_mono(mix_audio_path, self.config.spectral.sr))
+        return self._mix_cache[1]
 
     def validate(self, audio_path, midi_path, stem_name: str,
                  mode: Literal['audit', 'filter'], out_midi_path=None,
@@ -267,7 +279,7 @@ class SpectralMidiValidator:
         evidence = [compute_note_evidence(features, n.pitch, n.start, n.end, n.velocity) for n in notes_flat]
         for item in evidence:
             item.note_score = note_score(rule, item)
-        mix = load_mono(mix_audio_path, spectral.sr) if mix_audio_path is not None else None
+        mix = self._load_mix(mix_audio_path)
         presence = stem_presence(y, mix, evidence, spectral, self.config.presence_for(stem_name))
         absent = presence['verdict'] == 'absent'
         if mode == 'audit' or not (rule.filter_enabled or absent):
