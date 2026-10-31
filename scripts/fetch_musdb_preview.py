@@ -4,8 +4,8 @@ https://zenodo.org/records/3270814) for spectral presence calibration.
 
 Downloads MUSDB18-7-STEMS.zip (147 MB) into ``dest_dir`` (resume-safe: the
 transfer goes to a ``.part`` file, resumed with an HTTP Range request and only
-moved into place once complete), then extracts a deterministic subset of at
-most ``limit`` clips, half from each ``track_in_split`` split. For every clip
+moved into place once its size and the Zenodo md5 match), then extracts a
+deterministic subset of at most ``limit`` clips, half from each ``track_in_split`` split. For every clip
 the mixture (stream 0) and the vocals (stream 4) are written as WAV with
 ffmpeg to ``dest_dir/clips/<clip_id>/{mixture,vocals}.wav``.
 
@@ -34,6 +34,8 @@ from scripts.run_quality_benchmarks import track_in_split  # noqa: E402
 
 MUSDB7_URL = 'https://zenodo.org/records/3270814/files/MUSDB18-7-STEMS.zip?download=1'
 MUSDB7_SIZE = 147209385
+# md5 published by the Zenodo record API (https://zenodo.org/api/records/3270814).
+MUSDB7_MD5 = 'dc2bdfac5b46ce742bd60009866758a5'
 ARCHIVE_NAME = 'MUSDB18-7-STEMS.zip'
 STEM_SUFFIX = '.stem.mp4'
 # MUSDB stem order: 0 mixture, 1 drums, 2 bass, 3 other, 4 vocals.
@@ -60,9 +62,20 @@ def select_subset(member_names, limit: int = 50) -> list[str]:
     return sorted(chosen)
 
 
-def download(url: str, archive_path: Path, expected_size: int | None = MUSDB7_SIZE) -> Path:
+def _md5(path: Path) -> str:
+    digest = hashlib.md5()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download(url: str, archive_path: Path, expected_size: int | None = MUSDB7_SIZE,
+             expected_md5: str | None = MUSDB7_MD5) -> Path:
     archive_path = Path(archive_path)
     if archive_path.is_file() and (expected_size is None or archive_path.stat().st_size == expected_size):
+        if expected_md5 is not None and _md5(archive_path) != expected_md5:
+            raise ValueError(f'{archive_path} md5 does not match {expected_md5}; delete it and rerun')
         return archive_path
     part = Path(str(archive_path) + '.part')
     offset = part.stat().st_size if part.is_file() else 0
@@ -74,6 +87,10 @@ def download(url: str, archive_path: Path, expected_size: int | None = MUSDB7_SI
     size = part.stat().st_size
     if expected_size is not None and size != expected_size:
         raise ValueError(f'{part} has {size} bytes, expected {expected_size}; rerun to resume')
+    if expected_md5 is not None and _md5(part) != expected_md5:
+        # A complete but corrupt transfer cannot be fixed by resuming it.
+        part.unlink()
+        raise ValueError(f'{part} md5 does not match {expected_md5}; removed, rerun to download again')
     part.replace(archive_path)
     return archive_path
 

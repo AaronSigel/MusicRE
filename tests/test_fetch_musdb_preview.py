@@ -1,5 +1,9 @@
+import hashlib
+import io
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -26,3 +30,41 @@ def test_subset_is_deterministic_balanced_and_bounded():
     tune = [n for n in chosen if track_in_split(fm.clip_id(n), 'tune')]
     assert len(tune) == 25
     assert len(fm.select_subset(NAMES[:4], limit=50)) == 4
+
+
+class _Response(io.BytesIO):
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def _serve(monkeypatch, data):
+    monkeypatch.setattr(fm.urllib.request, 'urlopen', lambda request: _Response(data))
+
+
+def test_download_verifies_md5_and_drops_corrupt_part(tmp_path, monkeypatch):
+    data = b'musdb archive bytes'
+    archive = tmp_path / fm.ARCHIVE_NAME
+    _serve(monkeypatch, data)
+    with pytest.raises(ValueError, match='md5'):
+        fm.download('http://x', archive, expected_size=len(data), expected_md5='0' * 32)
+    assert not archive.exists() and not Path(str(archive) + '.part').exists()
+    good = hashlib.md5(data).hexdigest()
+    assert fm.download('http://x', archive, expected_size=len(data), expected_md5=good) == archive
+    assert archive.read_bytes() == data
+
+
+def test_download_rejects_existing_archive_with_wrong_md5(tmp_path, monkeypatch):
+    archive = tmp_path / fm.ARCHIVE_NAME
+    archive.write_bytes(b'corrupt!')
+    _serve(monkeypatch, b'unused')
+    with pytest.raises(ValueError, match='md5'):
+        fm.download('http://x', archive, expected_size=8, expected_md5='0' * 32)
+
+
+def test_default_md5_is_the_zenodo_checksum():
+    assert fm.MUSDB7_MD5 == 'dc2bdfac5b46ce742bd60009866758a5'
