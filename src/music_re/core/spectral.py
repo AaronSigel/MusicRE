@@ -24,7 +24,7 @@ class SpectralConfig:
     cqt_bins: int = 84
     cqt_bins_per_octave: int = 12
     cqt_fmin_midi: int = 24   # C1
-    chunk_sec: float = 60.0   # reserved for Task 7 chunked processing
+    chunk_sec: float = 60.0
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -108,7 +108,8 @@ def _compute_stft(
         return freqs, np.zeros(0, dtype=np.float32), np.zeros((len(freqs), 0), dtype=np.float32)
     y = _pad_for_fft(y, n_fft)
     stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length, window=window, center=True)
-    mag = np.abs(stft).astype(np.float32)
+    mag = np.abs(stft)
+    del stft
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft).astype(np.float32)
     times = librosa.frames_to_time(np.arange(mag.shape[1]), sr=sr, hop_length=hop_length).astype(np.float32)
     return freqs, times, mag
@@ -153,7 +154,8 @@ def compute_cqt(
         bins_per_octave=bins_per_octave,
         fmin=fmin,
     )
-    mag = np.abs(cqt).astype(np.float32)
+    mag = np.abs(cqt)
+    del cqt
     return mag, cqt_midi
 
 
@@ -185,7 +187,8 @@ def compute_spectral_flux(mag: np.ndarray) -> np.ndarray:
         return np.zeros(n_frames, dtype=np.float32)
 
     diff = np.diff(mag, prepend=mag[:, :1], axis=1)   # [freq, frames]
-    flux = np.maximum(diff, 0.0).sum(axis=0).astype(np.float32)
+    np.maximum(diff, 0.0, out=diff)
+    flux = diff.sum(axis=0, dtype=np.float32)
     return flux
 
 
@@ -248,6 +251,9 @@ def compute_stem_features(y: np.ndarray, config: SpectralConfig) -> StemSpectral
     """
     y_mono = _to_mono_float32(y)
 
+    if config.chunk_sec > 0 and y_mono.size > config.chunk_sec * config.sr:
+        return _compute_chunked_features(y_mono, config)
+
     # STFT
     stft_freqs, times, stft_mag = _compute_stft(
         y_mono, sr=config.sr, n_fft=config.n_fft, hop_length=config.hop_length,
@@ -286,6 +292,7 @@ def compute_stem_features(y: np.ndarray, config: SpectralConfig) -> StemSpectral
         window=config.window,
     )
     flux = compute_spectral_flux(flux_mag[:, :n_frames])
+    del flux_mag
 
     return StemSpectralFeatures(
         sr=config.sr,
@@ -298,6 +305,42 @@ def compute_stem_features(y: np.ndarray, config: SpectralConfig) -> StemSpectral
         rms=rms,
         flux=flux,
     )
+
+
+def _compute_chunked_features(y: np.ndarray, config: SpectralConfig) -> StemSpectralFeatures:
+    hop = config.hop_length
+    octaves = int(np.ceil(config.cqt_bins / config.cqt_bins_per_octave))
+    alignment = 2 ** max(0, octaves - 1)
+    chunk_frames = max(alignment, int(config.chunk_sec * config.sr / hop) // alignment * alignment)
+    q = 1.0 / (2 ** (1.0 / config.cqt_bins_per_octave) - 1.0)
+    filter_len = q * config.sr / midi_to_hz(config.cqt_fmin_midi)
+    overlap = int(np.ceil(2 * max(config.n_fft, filter_len) / hop / alignment)) * alignment
+    frames = 1 + len(y) // hop
+    whole_config = dataclasses.replace(config, chunk_sec=0)
+    result = None
+    for start in range(0, frames, chunk_frames):
+        end = min(start + chunk_frames, frames)
+        padded_start = max(0, start - overlap)
+        padded_end = min(len(y), (end + overlap) * hop)
+        part = compute_stem_features(y[padded_start * hop:padded_end], whole_config)
+        if result is None:
+            result = StemSpectralFeatures(
+                sr=config.sr, hop_length=hop,
+                times=(np.arange(frames) * (hop / config.sr)).astype(np.float32),
+                stft_freqs=part.stft_freqs,
+                stft_mag=np.empty((part.stft_mag.shape[0], frames), dtype=np.float32),
+                cqt_mag=np.empty((part.cqt_mag.shape[0], frames), dtype=np.float32),
+                cqt_midi=part.cqt_midi,
+                rms=np.empty(frames, dtype=np.float32),
+                flux=np.empty(frames, dtype=np.float32),
+            )
+        selection = slice(start - padded_start, end - padded_start)
+        result.stft_mag[:, start:end] = part.stft_mag[:, selection]
+        result.cqt_mag[:, start:end] = part.cqt_mag[:, selection]
+        result.rms[start:end] = part.rms[selection]
+        result.flux[start:end] = part.flux[selection]
+        del part
+    return result
 
 
 # ---------------------------------------------------------------------------
