@@ -225,13 +225,23 @@ def test_config_dict_is_deterministic_json_serializable_and_threshold_sensitive(
     assert config.to_dict() != changed.to_dict()
 
 
-def test_other_role_uses_stricter_reject_threshold_than_bass(tmp_path):
+def test_threshold_rule_other_uses_stricter_reject_threshold_than_bass(tmp_path):
     audio = _audio(tmp_path / 'a.wav')
+    config = SpectralValidatorConfig(roles={'bass': RoleRule(True, .10, .20, .10, .20),
+                                            'other': RoleRule(True, .06, .10, .10, .20)})
     results = {}
     for stem in ('bass', 'other'):
         midi = _midi(tmp_path / f'{stem}.mid', [_note(60)])
-        report = SpectralMidiValidator().validate(
+        report = SpectralMidiValidator(config).validate(
             audio, midi, stem, 'filter', tmp_path / f'{stem}-out.mid')
         results[stem] = report.notes[0].decision
     assert results['bass'] == 'reject'
     assert results['other'] in ('keep', 'uncertain')
+
+
+def test_default_other_role_uses_calibrated_score(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = _midi(tmp_path / 'other.mid', [_note(69), _note(60)])
+    report = SpectralMidiValidator().validate(audio, midi, 'other', 'filter', tmp_path / 'out.mid')
+    assert {n.pitch: n.decision for n in report.notes} == {69: 'keep', 60: 'reject'}
+    assert all(n.note_score is not None for n in report.notes)

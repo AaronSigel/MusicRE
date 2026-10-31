@@ -122,12 +122,14 @@ class NoteEvidence(BaseModel):
 class StemValidationReport(BaseModel):
     stem: str
     mode: Literal['audit', 'filter']
-    status: Literal['validated', 'skipped', 'unsupported']
+    status: Literal['validated', 'skipped', 'unsupported', 'absent']
     input_midi_path: str
     output_midi_path: Optional[str] = None
     notes: List[NoteEvidence] = Field(default_factory=list)
     counts: Dict[str, int] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+    # Stem presence features and verdict ('present', 'absent' or None when not evaluated).
+    presence: Optional[Dict[str, Any]] = None
 
 
 class SpectralValidationResult(BaseModel):

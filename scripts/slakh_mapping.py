@@ -45,6 +45,48 @@ GROUPS = ("vocals", "drums", "bass", "other")
 # Slakh stems and their mix are rendered from the same MIDI at the same
 # sample rate; any larger gap is a real desync, not rounding.
 ALIGNMENT_TOLERANCE_SEC = 0.05
+ALLOWED_OCTAVE_SHIFTS = frozenset({-24, -12, 0, 12})
+
+
+def estimate_octave_shift(audio: np.ndarray, sr: int, notes: list[pretty_midi.Note]) -> tuple[int, dict]:
+    """Estimate robust MIDI-to-audio octave offset from voiced note fundamentals."""
+    import librosa
+    duration = len(audio) / sr if sr else 0
+    windows = [(min(max(0.0, duration - 10.0), i * max(0.0, duration - 10.0) / 5),
+                min(duration, 10.0 + i * max(0.0, duration - 10.0) / 5)) for i in range(6)]
+    windows = list(dict.fromkeys((a, b) for a, b in windows if b > a))
+    histogram: Dict[int, int] = {}
+    measured = 0
+    visited = set()
+    for start, end in windows:
+        segment = np.asarray(audio[int(start * sr):int(end * sr)], dtype=float)
+        if len(segment) < 4096:
+            continue
+        f0, voiced, voiced_prob = librosa.pyin(segment, fmin=25, fmax=500, sr=sr,
+                                               frame_length=4096, hop_length=256)
+        times = librosa.times_like(f0, sr=sr, hop_length=256)
+        for note_index, note in enumerate(notes):
+            if note_index in visited:
+                continue
+            onset = max(note.start, start)
+            offset = min(note.end, end)
+            trim_start = max(onset + min(.05, .3 * (note.end - note.start)), start)
+            if offset <= trim_start:
+                continue
+            mask = ((times >= trim_start - start) & (times <= offset - start) & voiced
+                    & (voiced_prob >= .1) & np.isfinite(f0))
+            values = f0[mask]
+            if len(values) < 3:
+                continue
+            median_midi = 69 + 12 * np.log2(np.median(values) / 440.0)
+            shift = int(round((median_midi - note.pitch) / 12) * 12)
+            histogram[shift] = histogram.get(shift, 0) + 1
+            measured += 1
+            visited.add(note_index)
+    agreement = max(histogram.values(), default=0) / measured if measured else 0.0
+    shift = max(histogram, key=histogram.get) if measured >= 8 and agreement >= .6 else 0
+    return shift, dict(measured=measured, agreement=agreement, histogram=histogram,
+                       windows=[(round(a, 3), round(b, 3)) for a, b in windows])
 
 # Per-group reference completeness. Only ABSENT means "this instrument is not
 # in the song"; the other non-present states mean the reference itself is
@@ -119,6 +161,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
     group_notes: Dict[str, list] = {g: [] for g in GROUPS}
     group_note_counts: Dict[str, int] = {g: 0 for g in GROUPS}
     group_files: Dict[str, list] = {g: [] for g in GROUPS}
+    octave_shift_by_source: Dict[str, dict] = {g: {} for g in GROUPS}
     warnings: list = []
 
     for stem_id, info in metadata["stems"].items():
@@ -141,6 +184,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
             continue
         group_files[group].append((has_audio, has_midi))
 
+        y_mono = None
         if has_audio:
             y, _ = decode_audio(stem_wav, target_sr=sr, normalize_db=None)
             y_mono = y if y.ndim == 1 else y.mean(axis=1)
@@ -166,6 +210,21 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
 
         if has_midi:
             pm = pretty_midi.PrettyMIDI(str(stem_midi_path))
+            source_notes = [note for inst in pm.instruments for note in inst.notes]
+            if group == "bass":
+                shift = 0
+                diagnostics = {"measured": 0, "agreement": 0.0, "histogram": {}}
+                if y_mono is not None and source_notes:
+                    shift, diagnostics = estimate_octave_shift(y_mono, sr, source_notes)
+                if shift not in ALLOWED_OCTAVE_SHIFTS:
+                    warnings.append(f"{stem_id} (bass): implausible octave shift {shift:+d} semitones; ignored")
+                    shift = 0
+                octave_shift_by_source[group][stem_id] = shift
+                if shift:
+                    for note in source_notes:
+                        note.pitch = int(np.clip(note.pitch + shift, 0, 127))
+                    warnings.append(f"{stem_id} (bass): audio/MIDI octave mismatch detected ({shift:+d} semitones; "
+                                    f"{diagnostics['agreement']:.0%} agreement)")
             for inst in pm.instruments:
                 group_notes[group].extend(inst.notes)
                 group_note_counts[group] += len(inst.notes)
@@ -173,6 +232,12 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
             warnings.append(f"{stem_id} ({group}): MIDI file missing, group reference annotation is incomplete")
 
     group_status = {g: _group_status(group_files[g]) for g in GROUPS}
+    octave_shift = {g: 0 for g in GROUPS}
+    if octave_shift_by_source["bass"]:
+        counts = {}
+        for shift in octave_shift_by_source["bass"].values():
+            counts[shift] = counts.get(shift, 0) + 1
+        octave_shift["bass"] = max(counts, key=counts.get)
 
     gt_pm = pretty_midi.PrettyMIDI(initial_tempo=120.0)
     max_note_end = 0.0
@@ -216,5 +281,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
         "ground_truth_midi_path": str(out_dir / "ground_truth.mid"),
         "group_note_counts": group_note_counts,
         "group_status": group_status,
+        "octave_shift": octave_shift,
+        "octave_shift_by_source": octave_shift_by_source,
         "warnings": warnings,
     }

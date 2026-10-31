@@ -296,7 +296,7 @@ def _criterion(value, passed, target):
     return dict(status="PASS" if passed else "FAIL", value=value, target=target)
 
 
-def _compare(tracks: List[dict], mode: str) -> dict:
+def _compare(tracks: List[dict], mode: str, reused_cache: bool = False) -> dict:
     paired = [t for t in tracks if _ok(t["runs"].get("off")) and _ok(t["runs"].get(mode))]
     per_track, deltas = [], {k: [] for k in ("precision", "recall", "f1")}
     stem_deltas: Dict[str, list] = {}
@@ -368,15 +368,17 @@ def _compare(tracks: List[dict], mode: str) -> dict:
     )
     if worst_stem:
         acceptance["per_stem"]["stem"] = worst_stem
+    if reused_cache:
+        acceptance["extra_time"] = _criterion(None, False, "NOT_MEASURED: reused cache is not cold")
     return dict(n_paired=len(paired), delta=dict(**{f"pitched_{k}": v for k, v in mean.items()},
                                                   per_stem_f1=stem_means, absent_false_notes_reduction=reduction),
                 f1_distribution=distribution, per_track=per_track, acceptance=acceptance)
 
 
-def summarize_spectral_ab(tracks: List[dict], modes: List[str]) -> dict:
+def summarize_spectral_ab(tracks: List[dict], modes: List[str], reused_cache: bool = False) -> dict:
     names = ["off_cold", "off"] + [m for m in modes if m != "off"]
     return dict(modes={n: _mode_metrics(tracks, n) for n in names},
-                comparisons={m: _compare(tracks, m) for m in modes if m != "off"})
+                comparisons={m: _compare(tracks, m, reused_cache) for m in modes if m != "off"})
 
 
 def _fmt(value) -> str:
@@ -404,6 +406,8 @@ def discover_benchmark_tracks(raw_dir: Path) -> list[Path]:
 
 def render_markdown_report(report: dict) -> str:
     lines = ["# BenchmarkReport", "", f"Git revision: `{report.get('git_revision', 'unknown')}`", ""]
+    if report.get("reused_cache"):
+        lines += [f"Reused cache: `{report['reused_cache']}`", ""]
 
     lines += ["## Reference tracks (Slakh ground truth)", "",
               "| Track | SDR (dB) | Pitched F1 | Drums F1 | Kick F1 | Snare F1 | Hihat F1 | "
@@ -551,6 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--six-stems", action="store_true", default=False)
     parser.add_argument("--spectral-validation", nargs="+", choices=["off", "audit", "filter"], default=["off"])
     parser.add_argument("--split", choices=["tune", "test", "all"], default="all")
+    parser.add_argument("--reuse-cache", metavar="PATH", help="Reuse existing benchmark cache root")
     parser.add_argument("--_worker", help=argparse.SUPPRESS)
     return parser
 
@@ -582,7 +587,7 @@ def main():
     # group_note_counts correct without a separate "already prepared" cache.
     prepared_tracks, prep_failures = prepare_all_tracks(track_dirs, prepared_dir)
 
-    cache_root = _fresh_cache_root(Path("data/benchmarks/cache"))
+    cache_root = Path(args.reuse_cache) if args.reuse_cache else _fresh_cache_root(Path("data/benchmarks/cache"))
     modes = list(dict.fromkeys(args.spectral_validation))
     spectral = None
     if modes == ["off"]:
@@ -591,7 +596,7 @@ def main():
         ab_tracks = run_spectral_ab(prepared_tracks, cache_root, modes, profile=args.profile, six_stems=args.six_stems)
         reference_results = [_reference_entry(t) for t in ab_tracks] + prep_failures
         spectral = dict(modes_requested=modes, split=args.split, tracks=ab_tracks,
-                        **summarize_spectral_ab(ab_tracks, modes))
+                        **summarize_spectral_ab(ab_tracks, modes, reused_cache=bool(args.reuse_cache)))
     manual_results = run_manual_spotcheck([Path(p) for p in args.real_track], cache_root=cache_root, profile=args.profile, six_stems=args.six_stems)
 
     report = dict(
@@ -601,6 +606,7 @@ def main():
         generated_at=datetime.now(timezone.utc).isoformat(),
         profile=args.profile,
         six_stems=args.six_stems,
+        reused_cache=str(cache_root) if args.reuse_cache else None,
     )
     if spectral is not None:
         report["spectral_validation"] = spectral

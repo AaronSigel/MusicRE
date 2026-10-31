@@ -52,6 +52,7 @@ def test_cli_defaults_and_choices():
     assert args.spectral_validation == ['off'] and args.split == 'all'
     args = bench.build_parser().parse_args(['--spectral-validation', 'off', 'audit', 'filter', '--split', 'test'])
     assert args.spectral_validation == ['off', 'audit', 'filter'] and args.split == 'test'
+    assert bench.build_parser().parse_args(['--reuse-cache', '/tmp/cache']).reuse_cache == '/tmp/cache'
     with pytest.raises(SystemExit):
         bench.build_parser().parse_args(['--spectral-validation', 'bogus'])
 
@@ -92,6 +93,12 @@ def test_summary_deltas_and_per_track_distribution():
     assert acc['extra_time']['value'] == pytest.approx(3.0 / 300.0)
     assert acc['extra_ram']['value'] == pytest.approx(100.0)
     assert acc['f1']['status'] == 'FAIL' and acc['extra_time']['status'] == 'PASS'
+
+
+def test_reused_cache_disables_cold_extra_time_measurement():
+    tracks = [_track('a', filter=_run(time=12.0))]
+    summary = bench.summarize_spectral_ab(tracks, ['off', 'filter'], reused_cache=True)
+    assert summary['comparisons']['filter']['acceptance']['extra_time']['status'] == 'NOT_MEASURED'
 
 
 def test_recall_boundary_and_missing_data():
@@ -184,6 +191,26 @@ def test_main_wires_default_and_ab_paths(tmp_path, monkeypatch, extra):
         expected = [t for t in ids if bench.track_in_split(t, 'test')]
         assert [e['track_id'] for e in report['reference_tracks']] == expected
         assert report['spectral_validation']['comparisons']['filter']['acceptance']['recall']['status'] == 'PASS'
+
+
+def test_main_reuses_requested_cache_and_records_it(tmp_path, monkeypatch):
+    raw = tmp_path / 'raw'
+    (raw / 'Track00001').mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bench, 'prepare_track', lambda d, out: {
+        'track_id': d.name, 'mix_path': 'mix.wav', 'ground_truth_stems_dir': 'g',
+        'ground_truth_midi_path': 'g.mid', 'group_status': {}, 'warnings': []})
+    roots = []
+    monkeypatch.setattr(bench, 'run_spectral_ab', lambda tracks, root, modes, **k: roots.append(root) or [])
+    cache = tmp_path / 'existing-cache'
+    monkeypatch.setattr(sys, 'argv', ['bench', '--slakh-raw-dir', str(raw), '--reuse-cache', str(cache),
+                                     '--spectral-validation', 'off', 'audit', '--out-json', 'out.json',
+                                     '--out-md', 'out.md', '--history-dir', 'history'])
+    bench.main()
+    report = json.loads((tmp_path / 'out.json').read_text())
+    assert roots == [cache]
+    assert report['reused_cache'] == str(cache)
+    assert str(cache) in (tmp_path / 'out.md').read_text()
 
 
 def test_absent_reduction_needs_measured_counts_in_both_runs():

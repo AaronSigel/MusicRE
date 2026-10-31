@@ -10,9 +10,59 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from scripts.slakh_mapping import classify_stem, prepare_track
+from scripts.slakh_mapping import classify_stem, estimate_octave_shift, prepare_track
 
 SR = 22050
+
+
+def test_estimate_octave_shift_detects_audio_one_octave_below_midi():
+    import numpy as np
+    notes = [pretty_midi.Note(velocity=100, pitch=48, start=i, end=i + .6) for i in range(8)]
+    t = np.arange(SR * 9) / SR
+    audio = sum((.2 / harmonic) * np.sin(2 * np.pi * 65.406 * harmonic * t)
+                for harmonic in range(1, 4))
+    shift, diagnostics = estimate_octave_shift(audio, SR, notes)
+    assert shift == -12
+    assert diagnostics['measured'] >= 8 and diagnostics['agreement'] >= .6
+
+
+def test_estimate_octave_shift_detects_staccato_bass_one_octave_low():
+    import numpy as np
+    notes = [pretty_midi.Note(velocity=100, pitch=48, start=i * .15, end=i * .15 + .1) for i in range(10)]
+    t = np.arange(SR * 2) / SR
+    audio = np.zeros_like(t)
+    for note in notes:
+        active = (t >= note.start) & (t < note.end)
+        audio[active] = sum((.2 / h) * np.sin(2 * np.pi * 65.406 * h * t[active])
+                            for h in range(1, 4))
+    shift, diagnostics = estimate_octave_shift(audio, SR, notes)
+    assert shift == -12
+    assert diagnostics['measured'] >= 8
+
+
+def test_estimate_octave_shift_returns_zero_for_matching_noise_and_few_notes():
+    import numpy as np
+    notes = [pretty_midi.Note(velocity=100, pitch=48, start=i, end=i + .5) for i in range(8)]
+    t = np.arange(SR * 9) / SR
+    audio = sum((.2 / h) * np.sin(2 * np.pi * 130.813 * h * t) for h in range(1, 4))
+    assert estimate_octave_shift(audio, SR, notes)[0] == 0
+    assert estimate_octave_shift(np.random.default_rng(1).normal(0, .1, SR * 9), SR, notes)[0] == 0
+    shift, diagnostics = estimate_octave_shift(audio, SR, notes[:2])
+    assert shift == 0 and diagnostics['measured'] < 8
+
+
+def test_estimate_octave_shift_deduplicates_short_track_windows(monkeypatch):
+    import librosa
+    import numpy as np
+    calls = []
+
+    def fake_pyin(*args, **kwargs):
+        calls.append(1)
+        return np.array([np.nan]), np.array([False]), np.array([0.0])
+
+    monkeypatch.setattr(librosa, 'pyin', fake_pyin)
+    estimate_octave_shift(np.zeros(SR), SR, [])
+    assert len(calls) == 1
 
 
 def _write_fake_slakh_track(track_dir: Path, stems, duration_sec: float = 1.0):
@@ -77,6 +127,7 @@ def test_prepare_track_builds_grouped_ground_truth(tmp_path):
     result = prepare_track(track_dir, out_dir)
 
     assert result["track_id"] == "Track00001"
+    assert result["octave_shift"] == {"vocals": 0, "drums": 0, "bass": 0, "other": 0}
     gt_dir = Path(result["ground_truth_stems_dir"])
     assert (gt_dir / "drums.wav").exists()
     assert (gt_dir / "bass.wav").exists()
@@ -94,6 +145,60 @@ def test_prepare_track_builds_grouped_ground_truth(tmp_path):
     # separation_quality's shape check and SDR is silently never computed.
     drums_info = sf.info(str(gt_dir / "drums.wav"))
     assert drums_info.channels == 2
+
+
+def test_prepare_track_transposes_only_bass_reference(tmp_path, monkeypatch):
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00021", stems=[
+        ("S00", "Guitar", False, 48), ("S01", "Bass", False, 33),
+    ])
+    monkeypatch.setattr("scripts.slakh_mapping.estimate_octave_shift", lambda *a: (-12, {"agreement": 1.0}))
+    result = prepare_track(track_dir, tmp_path / "prepared-shift")
+    refs = pretty_midi.PrettyMIDI(result["ground_truth_midi_path"])
+    notes = {inst.name: [n.pitch for n in inst.notes] for inst in refs.instruments}
+    assert notes == {"bass": [48], "other": [60]}
+    assert result["octave_shift"]["bass"] == -12
+    assert any("octave mismatch" in w for w in result["warnings"])
+
+
+def test_prepare_track_corrects_bass_octaves_per_source(tmp_path):
+    import numpy as np
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00022", stems=[
+        ("S01", "Bass", False, 33), ("S05", "Bass", False, 34),
+    ], duration_sec=9.0)
+    t = np.arange(int(SR * 9.0)) / SR
+    source_audio = []
+    for index, (stem_id, frequency) in enumerate((("S01", 130.813), ("S05", 261.626))):
+        notes = [pretty_midi.Note(velocity=100, pitch=60, start=i + .1, end=i + .8) for i in range(8)]
+        pm = pretty_midi.PrettyMIDI()
+        inst = pretty_midi.Instrument(program=33 + index)
+        inst.notes.extend(notes)
+        pm.instruments.append(inst)
+        pm.write(str(track_dir / "MIDI" / f"{stem_id}.mid"))
+        audio = np.zeros_like(t)
+        for note in notes:
+            active = (t >= note.start) & (t < note.end)
+            audio[active] = sum((.2 / h) * np.sin(2 * np.pi * frequency * h * t[active])
+                                for h in range(1, 4))
+        sf.write(str(track_dir / "stems" / f"{stem_id}.wav"), audio, SR)
+        source_audio.append(audio)
+    sf.write(str(track_dir / "mix.wav"), source_audio[0] + source_audio[1], SR)
+
+    result = prepare_track(track_dir, tmp_path / "prepared-sources")
+    reference = pretty_midi.PrettyMIDI(result["ground_truth_midi_path"])
+    assert result["octave_shift_by_source"]["bass"] == {"S01": -12, "S05": 0}
+    assert result["octave_shift"]["bass"] == -12
+    assert sorted(note.pitch for note in reference.instruments[0].notes) == [48] * 8 + [60] * 8
+
+
+def test_prepare_track_rejects_implausible_source_octave_shift(tmp_path, monkeypatch):
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00023", stems=[("S10", "Bass", False, 33)])
+    monkeypatch.setattr("scripts.slakh_mapping.estimate_octave_shift",
+                        lambda *a: (-36, {"agreement": .71, "measured": 10, "histogram": {-36: 7, -12: 3}}))
+    result = prepare_track(track_dir, tmp_path / "prepared-implausible")
+    reference = pretty_midi.PrettyMIDI(result["ground_truth_midi_path"])
+    assert result["octave_shift_by_source"]["bass"]["S10"] == 0
+    assert reference.instruments[0].notes[0].pitch == 60
+    assert any("S10" in warning and "-36" in warning for warning in result["warnings"])
 
 
 def test_prepare_track_handles_missing_stem_audio_without_crashing(tmp_path):
