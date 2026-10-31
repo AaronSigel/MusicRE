@@ -46,13 +46,19 @@ def compute_note_evidence(
     # Integrate narrow fundamental/harmonic bands, then normalize by window spectral energy.
     harmonic = np.zeros(len(frames), dtype=np.float64)
     fundamental = np.zeros(len(frames), dtype=np.float64)
+    harmonic_presence = np.zeros(len(frames), dtype=np.float64)
     for k in range(1, 5):
         mask = np.abs(freqs - f0 * k) <= max(12.0, f0 * k * 0.018)
         if mask.any():
             band = np.max(mag[mask], axis=0)
             harmonic += band / k
+            nearby = np.abs(freqs - f0 * k)
+            background_mask = (nearby >= max(25.0, f0 * k * 0.03)) & (nearby <= max(80.0, f0 * k * 0.12))
+            background_level = np.mean(mag[background_mask], axis=0) if background_mask.any() else np.zeros(len(frames))
+            harmonic_presence += band / (band + 8.0 * background_level + 1e-12)
             if k == 1:
                 fundamental = band
+    harmonic_presence /= 4.0
     cqt = np.mean(features.cqt_mag[cqt_idx][:, frames], axis=0) if cqt_in_range else fundamental
     pitch_energy = np.maximum(cqt, fundamental)
     total = np.sum(mag, axis=0) + 1e-12
@@ -63,8 +69,17 @@ def compute_note_evidence(
     if norm <= 1e-10:
         return NoteEvidence(pitch=pitch, start_sec=start_sec, end_sec=end_sec,
                             velocity=velocity, reason=reason, **zero)
-    persistence = float(np.mean(pitch_relative > 0.08)) if cqt_in_range else float(np.mean(fundamental > np.max(fundamental) * .08))
-    support = float(np.mean(np.clip(pitch_relative, 0, 1))) if cqt_in_range else float(np.mean(fundamental / (np.max(fundamental) + 1e-12)))
+    if cqt_in_range:
+        pitch_track = np.mean(features.cqt_mag[cqt_idx], axis=0)
+        persistence_threshold = float(np.max(pitch_track)) * 0.08
+        persistence = float(np.mean(pitch_track[frames] > persistence_threshold))
+    else:
+        persistence_threshold = float(np.max(fundamental)) * .08
+        persistence = float(np.mean(fundamental > persistence_threshold))
+    harmonic_relative = np.clip(harmonic_presence, 0.0, 1.0)
+    support_frames = (0.7 * np.clip(pitch_relative, 0, 1) + 0.3 * harmonic_relative
+                      if cqt_in_range else harmonic_relative)
+    support = float(np.mean(support_frames))
     background_mask = np.ones(len(freqs), dtype=bool)
     for k in range(1, 5):
         background_mask &= np.abs(freqs - f0 * k) > max(25, f0 * k * .025)
