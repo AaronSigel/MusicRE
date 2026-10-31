@@ -146,7 +146,14 @@ class PresenceRule:
         return dataclasses.asdict(self)
 
 
-_DEFAULT_PRESENCE = tuple((role, PresenceRule(-30.0, 0.30)) for role in PRESENCE_ROLES)
+# Fitted by `scripts/calibrate_spectral.py presence` (BabySlakh cache 20261031T122948223612 plus
+# 50 MUSDB18 7-s previews, profile fast). Vocals: tune optimum min_rel_db -13.2 dB marked one
+# test stem with real vocals absent, so min_rel_db is capped at -30 dB (zero false-absent on
+# tune and test). Other roles have no usable absent examples (bass: Track00017 is not separable
+# from quiet present bass), so their rule never fires.
+_NEVER_ABSENT = PresenceRule(-200.0, 0.0)
+_DEFAULT_PRESENCE = tuple(
+    (role, PresenceRule(-30.0, 0.3759) if role == 'vocals' else _NEVER_ABSENT) for role in PRESENCE_ROLES)
 
 
 def _as_entries(value):

@@ -417,22 +417,29 @@ def musdb_presence_examples(musdb_dir, cache_dir, profile='fast'):
     return examples, levels
 
 
-def calibrate_presence(examples) -> dict:
-    """Per role thresholds; roles without own absent examples inherit the strictest calibrated rule."""
-    result = {'roles': {}}
-    for role in sorted({e.role for e in examples}):
+def _absent_notes(rows, rule) -> dict:
+    """Notes on absent-labelled stems: total and removed by the rule, per split."""
+    return {split: dict(total=sum(e.n_notes for e in rows if e.split == split and e.label == 'absent'),
+                        removed=sum(e.n_notes for e in rows if e.split == split and e.label == 'absent'
+                                    and is_absent(e, rule)))
+            for split in ('tune', 'test')}
+
+
+def calibrate_presence(examples, max_rel_db=None) -> dict:
+    """Per-role thresholds. Roles without usable absent examples get a rule that never fires.
+
+    max_rel_db optionally caps min_rel_db (a more conservative rule than the tune optimum).
+    """
+    result = {'roles': {}, 'max_rel_db': max_rel_db}
+    for role in sorted(set(PRESENCE_ROLES) | {e.role for e in examples}):
         rows = [e for e in examples if e.role == role]
         rule = choose_presence_thresholds(rows)
-        result['roles'][role] = dict(rule=rule, metrics=presence_metrics(rows, rule))
-    calibrated = [r['rule'] for r in result['roles'].values() if r['rule'] != NEVER_ABSENT]
-    if calibrated:
-        strict = {'min_rel_db': min(r['min_rel_db'] for r in calibrated),
-                  'min_median_support': min(r['min_median_support'] for r in calibrated)}
-        for role in PRESENCE_ROLES:
-            entry = result['roles'].get(role)
-            if entry is None or entry['rule'] == NEVER_ABSENT:
-                rows = [e for e in examples if e.role == role]
-                result['roles'][role] = dict(rule=strict, inherited=True, metrics=presence_metrics(rows, strict))
+        tune_rule = dict(rule)
+        if max_rel_db is not None and rule != NEVER_ABSENT:
+            rule['min_rel_db'] = min(rule['min_rel_db'], float(max_rel_db))
+        result['roles'][role] = dict(rule=rule, tune_rule=tune_rule, metrics=presence_metrics(rows, rule),
+                                     tune_rule_metrics=presence_metrics(rows, tune_rule),
+                                     absent_notes=_absent_notes(rows, rule))
     result['examples'] = [e.__dict__ for e in examples]
     return result
 
@@ -444,7 +451,7 @@ def format_presence_table(result: dict) -> str:
         rule = data['rule']
         for split, m in data['metrics'].items():
             recall = f"{m['absent_recall']:.3f}" if m['absent_recall'] is not None else '-'
-            lines.append(f"| {role}{' (inherited)' if data.get('inherited') else ''} | "
+            lines.append(f"| {role} | "
                          f"{rule['min_rel_db']:.2f} | {rule['min_median_support']:.4f} | {split} | "
                          f"{m['n_present']} | {m['n_absent']} | {m['false_absent']} | "
                          f"{m['absent_detected']} | {recall} |")
@@ -458,6 +465,8 @@ def presence_main(argv) -> int:
     parser.add_argument('--musdb-dir', type=Path, default=None)
     parser.add_argument('--musdb-cache', type=Path, default=Path('data/benchmarks/calibration/musdb_cache'))
     parser.add_argument('--profile', default='fast')
+    parser.add_argument('--max-rel-db', type=float, default=None,
+                        help='cap min_rel_db below the tune optimum (more conservative)')
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args(argv)
     examples = slakh_presence_examples(args.slakh_cache, args.prepared_dir)
@@ -465,7 +474,7 @@ def presence_main(argv) -> int:
     if args.musdb_dir is not None:
         musdb, levels = musdb_presence_examples(args.musdb_dir, args.musdb_cache, args.profile)
         examples += musdb
-    result = calibrate_presence(examples)
+    result = calibrate_presence(examples, args.max_rel_db)
     result['musdb_levels'] = levels
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2))

@@ -190,3 +190,16 @@ def test_label_musdb_clip_by_vocal_level():
     assert cs.musdb_label(-30.0) == 'present'
     assert cs.musdb_label(-45.0) is None
     assert cs.musdb_label(-70.0) == 'absent'
+
+
+def test_calibrate_presence_caps_rel_db_and_disables_roles_without_absent_examples():
+    examples = [_ex(-10, .5, 'present'), _ex(-40, .2, 'absent'), _ex(-20, .2, 'absent'),
+                _ex(-30, .1, 'absent', 'test'), _ex(-8, .4, 'present', role='bass')]
+    result = cs.calibrate_presence(examples, max_rel_db=-25.0)
+    vocals = result['roles']['vocals']
+    assert vocals['tune_rule']['min_rel_db'] > -20
+    assert vocals['rule']['min_rel_db'] == -25.0
+    assert vocals['metrics']['tune']['absent_detected'] == 1
+    assert vocals['absent_notes'] == {'tune': {'total': 2, 'removed': 1}, 'test': {'total': 1, 'removed': 1}}
+    for role in ('bass', 'other', 'guitar', 'piano'):
+        assert result['roles'][role]['rule'] == cs.NEVER_ABSENT
