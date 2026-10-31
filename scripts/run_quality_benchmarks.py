@@ -28,7 +28,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from music_re.core.pipeline import run_pipeline
 from music_re.core.quality import evaluate_quality
-from music_re.core.quality_midi import _score
+from music_re.core.quality_midi import score_notes
 from music_re.workspace import WorkspaceManager, active_midis
 from scripts.fetch_slakh_subset import fetch_babyslakh
 from scripts.slakh_mapping import ABSENT, prepare_track
@@ -38,25 +38,6 @@ def track_in_split(track_id: str, split: str) -> bool:
     if split not in ('all', 'tune', 'test'):
         raise ValueError(f'Invalid split: {split}')
     return split == 'all' or (int(hashlib.sha1(track_id.encode()).hexdigest(), 16) % 2 == (split == 'test'))
-
-
-def compare_modes(baseline: List[dict], trial: List[dict]) -> dict:
-    by_id = {entry['track_id']: entry for entry in baseline}
-    f1_deltas, recall_deltas = [], []
-    for entry in trial:
-        original = by_id.get(entry['track_id'])
-        if original is None or not original.get('quality_report') or not entry.get('quality_report'):
-            continue
-        a = (original['quality_report'].get('transcription_metrics') or {}).get('pitched') or {}
-        b = (entry['quality_report'].get('transcription_metrics') or {}).get('pitched') or {}
-        for key, result in [('onset_pitch_f1', f1_deltas), ('onset_pitch_recall', recall_deltas)]:
-            if a.get(key) is not None and b.get(key) is not None:
-                result.append(b[key] - a[key])
-    distribution = {'min': min(f1_deltas), 'median': statistics.median(f1_deltas),
-                    'max': max(f1_deltas), 'drops_over_0_02': sum(x < -0.02 - 1e-12 for x in f1_deltas)} if f1_deltas else None
-    recall = statistics.mean(recall_deltas) if recall_deltas else None
-    return {'f1_distribution': distribution, 'acceptance': {'recall': {
-        'value': recall, 'status': 'NOT EVALUATED' if recall is None else ('PASS' if recall >= -0.02 - 1e-12 else 'FAIL')}}}
 
 
 def _fresh_cache_root(base: Path) -> Path:
@@ -200,7 +181,7 @@ def _per_stem_f1(workspace, mix_path, ground_truth_midi) -> Dict[str, float]:
             continue
         ref_notes = [n for inst in reference.instruments if inst.name == role for n in inst.notes]
         est_notes = [n for inst in pretty_midi.PrettyMIDI(str(path)).instruments for n in inst.notes]
-        result[role] = _score(ref_notes, est_notes, offsets=False)["f1"]
+        result[role] = score_notes(ref_notes, est_notes)["f1"]
     return result
 
 

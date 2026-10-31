@@ -41,6 +41,11 @@ def _score(reference, estimate, offsets):
     return dict(precision=float(p), recall=float(r), f1=float(f))
 
 
+def score_notes(reference, estimate, offsets=False):
+    """mir_eval note precision/recall/F1 for two pretty_midi note lists."""
+    return _score(reference, estimate, offsets)
+
+
 def transcription_quality(midis, ground_truth=None):
     metrics = dict(mode='diagnostic_note_density', comparisons=0, total_notes=0, stems={}, warnings=[])
     estimates = []

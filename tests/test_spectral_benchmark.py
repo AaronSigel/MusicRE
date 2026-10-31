@@ -19,20 +19,14 @@ def test_split_is_deterministic_and_disjoint():
     assert tune == [x for x in ids if bench.track_in_split(x, 'tune')]
 
 
-def test_comparison_reports_distribution_and_recall_boundary():
-    def row(track, f1, recall):
-        return {'track_id': track, 'quality_report': {'transcription_metrics': {'pitched': {
-            'onset_pitch_f1': f1, 'onset_pitch_recall': recall}}}}
-    base = [row('a', .8, .8), row('b', .8, .8)]
-    trial = [row('a', .77, .78), row('b', .81, .78)]
-    comparison = bench.compare_modes(base, trial)
-    assert comparison['f1_distribution']['min'] == pytest.approx(-.03)
-    assert comparison['f1_distribution']['median'] == pytest.approx(-.01)
-    assert comparison['f1_distribution']['max'] == pytest.approx(.01)
-    assert comparison['f1_distribution']['drops_over_0_02'] == 1
-    assert comparison['acceptance']['recall']['status'] == 'PASS'
-    trial = [row('a', .77, .779), row('b', .81, .779)]
-    assert bench.compare_modes(base, trial)['acceptance']['recall']['status'] == 'FAIL'
+def test_benchmark_uses_public_note_scorer():
+    import pretty_midi
+    from music_re.core import quality_midi
+    ref = [pretty_midi.Note(velocity=100, pitch=60, start=0, end=.5), pretty_midi.Note(velocity=100, pitch=64, start=1, end=1.5)]
+    est = [pretty_midi.Note(velocity=100, pitch=60, start=0, end=.5)]
+    assert quality_midi.score_notes(ref, est) == {'precision': 1.0, 'recall': .5, 'f1': pytest.approx(2 / 3)}
+    assert bench.score_notes is quality_midi.score_notes
+    assert not hasattr(bench, '_score') and not hasattr(bench, 'compare_modes')
 
 
 def _qr(f1=.8, precision=.8, recall=.8, stems=None, sdr=10.0):
