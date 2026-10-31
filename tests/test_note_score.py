@@ -141,5 +141,6 @@ def test_old_rule_path_leaves_note_score_empty(tmp_path):
 def test_algo_version_tracks_default_role_calibration():
     calibrated = any(rule.score_weights is not None for _, rule in mv._DEFAULT_ROLES)
     assert calibrated and mv._DEFAULT_PRESENCE
-    # v3 adds the calibrated stem presence rule on top of the v2 note score.
-    assert mv.SPECTRAL_ALGO_VERSION == 'spectral-v3'
+    # v3 adds the calibrated stem presence rule on top of the v2 note score;
+    # v4 drops the uncalibrated presence rules (verdict None for those roles).
+    assert mv.SPECTRAL_ALGO_VERSION == 'spectral-v4'

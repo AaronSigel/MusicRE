@@ -149,16 +149,27 @@ def test_role_without_presence_rule_is_not_checked(tmp_path, quiet):
     assert report.status == 'validated'
 
 
-def test_default_config_has_presence_for_pitched_roles_only():
+def test_default_config_has_presence_for_calibrated_roles_only():
     config = SpectralValidatorConfig()
     data = config.to_dict()
-    assert set(data['presence']) == set(PRESENCE_ROLES) == {'vocals', 'bass', 'other', 'guitar', 'piano'}
+    assert set(PRESENCE_ROLES) == {'vocals', 'bass', 'other', 'guitar', 'piano'}
+    assert set(data['presence']) == {'vocals'}
     for rule in data['presence'].values():
         assert set(rule) == {'min_rel_db', 'min_median_support'}
     changed = SpectralValidatorConfig(presence={'vocals': PresenceRule(-10.0, .1)})
     assert changed.to_dict() != data
     assert config.presence_for('drums') is None
     hash(config)
+
+
+@pytest.mark.parametrize('role', ['bass', 'other', 'guitar', 'piano'])
+def test_default_uncalibrated_roles_report_no_presence_verdict(tmp_path, role):
+    mix = _tone(tmp_path / 'mix.wav', 0.5)
+    stem = _tone(tmp_path / 'stem.wav', 0.3)
+    midi = _midi(tmp_path / f'{role}.mid')
+    report = SpectralMidiValidator().validate(stem, midi, role, 'audit', mix_audio_path=mix)
+    assert report.presence['rel_db'] is not None
+    assert report.presence['verdict'] is None
 
 
 def test_presence_rule_rejects_non_finite():

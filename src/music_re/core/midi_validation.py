@@ -16,7 +16,7 @@ from music_re.core.spectral import (SpectralConfig, StemSpectralFeatures, comput
 from music_re.schemas import NoteEvidence, StemValidationReport
 
 
-SPECTRAL_ALGO_VERSION = 'spectral-v3'
+SPECTRAL_ALGO_VERSION = 'spectral-v4'
 
 
 # Order of the inputs to the calibrated note score (scripts/calibrate_spectral.py).
@@ -147,13 +147,15 @@ class PresenceRule:
 
 
 # Fitted by `scripts/calibrate_spectral.py presence` (BabySlakh cache 20261031T122948223612 plus
-# 50 MUSDB18 7-s previews, profile fast). Vocals: tune optimum min_rel_db -13.2 dB marked one
-# test stem with real vocals absent, so min_rel_db is capped at -30 dB (zero false-absent on
-# tune and test). Other roles have no usable absent examples (bass: Track00017 is not separable
-# from quiet present bass), so their rule never fires.
-_NEVER_ABSENT = PresenceRule(-200.0, 0.0)
-_DEFAULT_PRESENCE = tuple(
-    (role, PresenceRule(-30.0, 0.3759) if role == 'vocals' else _NEVER_ABSENT) for role in PRESENCE_ROLES)
+# 50 MUSDB18 7-s previews, profile fast). Vocals: the tune optimum min_rel_db -13.2 dB marked one
+# test stem with real vocals absent (PR - Oh No, -27.7 dB). The -30 dB cap was chosen AFTER
+# inspecting that test-split result (ledger ruling R4), so the test split is not a holdout for
+# presence: its zero false-absent is an all-tracks figure, not an unbiased estimate. The cap
+# only moves the rule in the conservative direction (fewer drops).
+# Only calibrated roles get a rule. The other PRESENCE_ROLES (bass, other, guitar, piano) have no
+# usable absent examples (bass: Track00017 is not separable from quiet present bass), so their
+# verdict stays None (not evaluated) rather than an unfounded 'present'.
+_DEFAULT_PRESENCE = (('vocals', PresenceRule(-30.0, 0.3759)),)
 
 
 def _as_entries(value):
