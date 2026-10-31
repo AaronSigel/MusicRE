@@ -198,6 +198,8 @@ def detect_harmonic_peaks(
     f0: float,
     num_harmonics: int = 4,
     tolerance_hz: float = 15.0,
+    min_peak_ratio: float = 3.0,
+    background_hz: float = 100.0,
 ) -> list[float]:
     """Find spectral peaks near the first `num_harmonics` harmonics of f0.
 
@@ -207,6 +209,9 @@ def detect_harmonic_peaks(
         f0:         fundamental frequency in Hz.
         num_harmonics: how many harmonics to search for.
         tolerance_hz:  search window around each harmonic.
+        min_peak_ratio: a peak must exceed this multiple of the median
+                        magnitude within +-background_hz, so broadband
+                        noise does not count as harmonic support.
 
     Returns:
         List of detected peak frequencies (Hz) as floats.
@@ -228,7 +233,9 @@ def detect_harmonic_peaks(
         candidates = peaks_idx[mask]
         if candidates.size > 0:
             best = candidates[np.argmax(mag_column[candidates])]
-            found.append(float(freqs[best]))
+            background = np.median(mag_column[np.abs(freqs - target) <= background_hz])
+            if mag_column[best] > 0 and mag_column[best] >= min_peak_ratio * background:
+                found.append(float(freqs[best]))
     return found
 
 

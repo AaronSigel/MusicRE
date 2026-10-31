@@ -238,6 +238,25 @@ class TestDetectHarmonicPeaks:
         peaks = detect_harmonic_peaks(mag.mean(axis=1), freqs, f0=440.0)
         assert all(isinstance(p, float) for p in peaks)
 
+    def test_white_noise_is_flat_and_has_no_false_harmonic_peak(self):
+        from music_re.core.spectral import compute_stft, detect_harmonic_peaks
+        y = np.random.default_rng(0).standard_normal(SR * 2).astype(np.float32) * 0.1
+        freqs, _, mag = compute_stft(y)
+        mean_col = mag.mean(axis=1)
+        assert np.all(np.isfinite(mag))
+        bands = [mean_col[(freqs >= lo) & (freqs < lo * 2)].mean() for lo in (100, 200, 400, 800, 1600, 3200)]
+        assert max(bands) / min(bands) < 1.5
+        assert detect_harmonic_peaks(mean_col, freqs, f0=440.0) == []
+
+    def test_two_tone_mix_detects_both_tones(self):
+        from music_re.core.spectral import compute_stft, detect_harmonic_peaks
+        y = _sine(440.0) + _sine(660.0)
+        freqs, _, mag = compute_stft(y)
+        mean_col = mag.mean(axis=1)
+        for f0 in (440.0, 660.0):
+            peaks = detect_harmonic_peaks(mean_col, freqs, f0=f0, num_harmonics=1)
+            assert len(peaks) == 1 and abs(peaks[0] - f0) < freqs[1]
+
 
 # ---------------------------------------------------------------------------
 # SpectralConfig dataclass
