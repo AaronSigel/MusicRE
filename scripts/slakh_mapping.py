@@ -139,7 +139,14 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
     ground_truth_stems_dir, ground_truth_midi_path, group_note_counts
     (0 for a group with no Slakh stem mapped to it), group_status (one of
     present / absent / missing_annotation / not_rendered per group, see
-    _group_status) and warnings.
+    _group_status), octave_shift, octave_shift_by_source and warnings.
+
+    octave_shift_by_source ({group: {stem_id: semitones}}) is authoritative:
+    each bass source stem's MIDI is transposed by its own entry before the
+    notes are merged into the group reference. octave_shift ({group:
+    semitones}) is only a summary (the most common per-source shift of the
+    group); it was not applied as a whole and must not be used to correct or
+    reproduce the reference.
 
     out_dir is built in a fresh staging dir next to it and swapped in as a
     whole, so a re-run never leaves files from an earlier run behind and a
@@ -232,6 +239,7 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
             warnings.append(f"{stem_id} ({group}): MIDI file missing, group reference annotation is incomplete")
 
     group_status = {g: _group_status(group_files[g]) for g in GROUPS}
+    # Summary only: the per-source shifts above were already applied.
     octave_shift = {g: 0 for g in GROUPS}
     if octave_shift_by_source["bass"]:
         counts = {}
