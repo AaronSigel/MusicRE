@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 import pretty_midi
+import pytest
 import soundfile as sf
 
 from music_re.core.midi_validation import (
@@ -35,78 +36,134 @@ def _digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_audit_is_byte_identical_and_unscored(tmp_path):
+def test_audit_is_byte_identical_unscored_and_writes_no_output(tmp_path):
     audio = _audio(tmp_path / 'a.wav')
     midi = _midi(tmp_path / 'a.mid', [_note(69)])
     before = _digest(midi)
-    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'audit')
+    output = tmp_path / 'must-not-exist.mid'
+    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'audit', output)
     assert _digest(midi) == before
     assert [n.decision for n in report.notes] == ['unscored']
+    assert not output.exists()
     assert report.output_midi_path is None
 
 
-def test_filter_rejects_wrong_pitch_and_preserves_original_and_note_fields(tmp_path):
+def test_bass_filter_rejects_wrong_pitch_keeps_correct_and_preserves_original(tmp_path):
     audio = _audio(tmp_path / 'a.wav')
     midi = _midi(tmp_path / 'a.mid', [_note(69), _note(60, .1, .8, 53)])
-    original_notes = {n.pitch: n for n in pretty_midi.PrettyMIDI(str(midi)).instruments[0].notes}
     before = _digest(midi)
     out = tmp_path / 'filtered.mid'
     report = SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', out)
     assert {n.pitch: n.decision for n in report.notes} == {69: 'keep', 60: 'reject'}
     assert _digest(midi) == before
+    notes = pretty_midi.PrettyMIDI(str(out)).instruments[0].notes
+    assert [(n.pitch, n.velocity) for n in notes] == [(69, 87)]
+
+
+def test_kept_note_fields_tempo_program_and_instrument_name_are_preserved(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = _midi(tmp_path / 'a.mid', [_note(69)])
+    source_midi = pretty_midi.PrettyMIDI(str(midi))
+    source = source_midi.instruments[0].notes[0]
+    out = tmp_path / 'filtered.mid'
+    SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', out)
     result = pretty_midi.PrettyMIDI(str(out))
-    assert len(result.instruments[0].notes) == 1
     kept = result.instruments[0].notes[0]
-    source = original_notes[69]
-    assert (kept.pitch, kept.start, kept.end, kept.velocity) == (source.pitch, source.start, source.end, source.velocity)
-    assert result.instruments[0].program == 32
-    assert result.instruments[0].name == 'Bass'
-    assert result.get_tempo_changes()[1][0] == pretty_midi.PrettyMIDI(str(midi)).get_tempo_changes()[1][0]
+    assert (kept.pitch, kept.start, kept.end, kept.velocity) == (
+        source.pitch, source.start, source.end, source.velocity)
+    assert result.get_tempo_changes() == source_midi.get_tempo_changes()
+    assert result.instruments[0].program == source_midi.instruments[0].program
+    assert result.instruments[0].name == source_midi.instruments[0].name
 
 
-def test_empty_polyphony_and_no_duplicates(tmp_path):
+def test_empty_midi_writes_valid_empty_output_and_zero_counts(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = _midi(tmp_path / 'empty.mid')
+    out = tmp_path / 'empty-out.mid'
+    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', out)
+    assert report.counts == {}
+    assert all(not instrument.notes for instrument in pretty_midi.PrettyMIDI(str(out)).instruments)
+
+
+def test_polyphony_keeps_both_simultaneous_supported_notes(tmp_path):
     audio = _audio(tmp_path / 'a.wav', (440.0, 523.25))
     midi = _midi(tmp_path / 'a.mid', [_note(69), _note(72)])
-    out = tmp_path / 'filtered.mid'
-    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', out)
-    assert [n.decision for n in report.notes] == ['keep', 'keep']
+    report = SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', tmp_path / 'out.mid')
+    assert {note.pitch: note.decision for note in report.notes} == {69: 'keep', 72: 'keep'}
+
+
+def test_filter_does_not_introduce_duplicate_notes(tmp_path):
+    audio = _audio(tmp_path / 'a.wav', (440.0, 523.25))
+    midi = _midi(tmp_path / 'a.mid', [_note(69), _note(72)])
+    out = tmp_path / 'out.mid'
+    SpectralMidiValidator().validate(audio, midi, 'bass', 'filter', out)
     notes = pretty_midi.PrettyMIDI(str(out)).instruments[0].notes
-    assert len(notes) == len({(n.pitch, n.start, n.end, n.velocity) for n in notes}) == 2
-    empty = _midi(tmp_path / 'empty.mid')
-    empty_out = tmp_path / 'empty-out.mid'
-    empty_report = SpectralMidiValidator().validate(audio, empty, 'bass', 'filter', empty_out)
-    assert empty_report.counts == {}
-    assert all(not instrument.notes for instrument in pretty_midi.PrettyMIDI(str(empty_out)).instruments)
+    keys = {(n.pitch, n.start, n.end, n.velocity) for n in notes}
+    assert len(notes) == len(keys) == 2
 
 
-def test_special_roles_passthrough_and_config_serialization(tmp_path):
+@pytest.mark.parametrize(('stem', 'status', 'decision'), [
+    ('drums', 'skipped', 'skipped'),
+    ('synth', 'unsupported', 'unsupported'),
+])
+def test_drums_and_unknown_stems_copy_through_with_expected_status(
+    tmp_path, stem, status, decision
+):
     audio = _audio(tmp_path / 'a.wav')
-    for stem in ('piano', 'vocals', 'drums', 'synth'):
-        midi = _midi(tmp_path / f'{stem}.mid', [_note(60)])
-        out = tmp_path / f'{stem}-out.mid'
-        report = SpectralMidiValidator().validate(audio, midi, stem, 'filter', out)
-        assert len(pretty_midi.PrettyMIDI(str(out)).instruments[0].notes) == 1
-        if stem == 'drums':
-            assert report.status == 'skipped' and report.notes[0].decision == 'skipped'
-        elif stem == 'synth':
-            assert report.status == 'unsupported' and report.notes[0].decision == 'unsupported'
-            assert report.warnings
-        else:
-            assert report.notes[0].decision == 'unscored'
-    config = SpectralValidatorConfig()
-    assert json.dumps(config.to_dict(), sort_keys=True) == json.dumps(config.to_dict(), sort_keys=True)
-    changed = SpectralValidatorConfig(roles=(('bass', RoleRule(True, .2, .2, .5, .5)),))
-    assert changed.to_dict() != config.to_dict()
+    midi = _midi(tmp_path / f'{stem}.mid', [_note(60)])
+    before = _digest(midi)
+    out = tmp_path / f'{stem}-out.mid'
+    validator = SpectralMidiValidator()
+    if stem == 'synth':
+        with pytest.warns(UserWarning, match='Unsupported stem'):
+            report = validator.validate(audio, midi, stem, 'filter', out)
+        assert report.warnings
+    else:
+        report = validator.validate(audio, midi, stem, 'filter', out)
+    assert report.status == status
+    assert report.notes[0].decision == decision
+    assert _digest(out) == before
 
 
-def test_filter_requires_distinct_output_and_supported_mode(tmp_path):
+@pytest.mark.parametrize('stem', ['piano', 'vocals'])
+def test_audit_only_roles_never_reject_wrong_pitch_in_filter_mode(tmp_path, stem):
+    audio = _audio(tmp_path / 'a.wav')
+    midi = _midi(tmp_path / f'{stem}.mid', [_note(60)])
+    report = SpectralMidiValidator().validate(audio, midi, stem, 'filter', tmp_path / 'out.mid')
+    assert report.notes[0].decision == 'unscored'
+    assert len(pretty_midi.PrettyMIDI(str(tmp_path / 'out.mid')).instruments[0].notes) == 1
+
+
+@pytest.mark.parametrize('mode,out_path', [
+    ('filter', None),
+    ('filter', 'same'),
+    ('off', None),
+])
+def test_invalid_filter_arguments_raise_value_error(tmp_path, mode, out_path):
     audio = _audio(tmp_path / 'a.wav')
     midi = _midi(tmp_path / 'a.mid')
-    validator = SpectralMidiValidator()
-    import pytest
+    out = midi if out_path == 'same' else None
     with pytest.raises(ValueError):
-        validator.validate(audio, midi, 'bass', 'filter')
-    with pytest.raises(ValueError):
-        validator.validate(audio, midi, 'bass', 'filter', midi)
-    with pytest.raises(ValueError):
-        validator.validate(audio, midi, 'bass', 'off')
+        SpectralMidiValidator().validate(audio, midi, 'bass', mode, out)
+
+
+def test_config_dict_is_deterministic_json_serializable_and_threshold_sensitive():
+    config = SpectralValidatorConfig()
+    encoded = json.dumps(config.to_dict(), sort_keys=True)
+    assert encoded == json.dumps(config.to_dict(), sort_keys=True)
+    changed = SpectralValidatorConfig(roles=(
+        ('bass', RoleRule(True, .11, .20, .10, .20)),
+    ))
+    assert config.to_dict() != changed.to_dict()
+
+
+def test_other_role_uses_stricter_reject_threshold_than_bass(tmp_path):
+    audio = _audio(tmp_path / 'a.wav')
+    results = {}
+    for stem in ('bass', 'other'):
+        midi = _midi(tmp_path / f'{stem}.mid', [_note(60)])
+        report = SpectralMidiValidator().validate(
+            audio, midi, stem, 'filter', tmp_path / f'{stem}-out.mid')
+        results[stem] = report.notes[0].decision
+    assert results['bass'] == 'reject'
+    assert results['other'] in ('keep', 'uncertain')
