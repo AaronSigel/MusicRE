@@ -217,7 +217,10 @@ def worker_main(spec: dict) -> dict:
         ground_truth_midi=spec.get("ground_truth_midi"), profile=spec.get("profile", "fast"),
         six_stems=spec.get("six_stems", False), spectral_validation=spec["mode"])
     per_stem, per_stem_error = {}, None
-    if error is None and spec.get("ground_truth_midi"):
+    if spec.get("six_stems"):
+        # Slakh references group guitar/piano into "other"; six-stem output has no matching reference.
+        per_stem, per_stem_error = None, "six-stem output not scored: references group guitar/piano into other"
+    elif error is None and spec.get("ground_truth_midi"):
         try:
             per_stem = _per_stem_f1(ws, spec["mix_path"], spec["ground_truth_midi"])
         except Exception as e:
@@ -281,8 +284,16 @@ def _mean(values):
     return statistics.mean(values) if values else None
 
 
-def _absent_total(run: dict, group_status: dict) -> int:
-    return sum(_false_notes_on_absent_instrument(run.get("quality_report"), group_status).values())
+def _absent_total(run: dict, group_status: dict) -> Optional[int]:
+    """Notes on absent groups; None unless every absent group has a measured count."""
+    stems = ((run.get("quality_report") or {}).get("transcription_metrics") or {}).get("stems") or {}
+    counts = [(stems.get(g) or {}).get("notes_count") for g, s in group_status.items() if s == ABSENT]
+    return None if None in counts else sum(counts)
+
+
+def _sum_or_none(values):
+    values = list(values)
+    return None if None in values else sum(values)
 
 
 def _mode_metrics(tracks: List[dict], name: str) -> dict:
@@ -293,7 +304,7 @@ def _mode_metrics(tracks: List[dict], name: str) -> dict:
         n_ok=len(ok), n_errors=len(runs) - len(ok),
         **{f"pitched_{k}": _mean(_pitched(r, k) for _, r in ok) for k in ("precision", "recall", "f1")},
         per_stem_f1={s: _mean((r.get("per_stem_f1") or {}).get(s) for _, r in ok) for s in stems},
-        absent_false_notes=sum(_absent_total(r, t["group_status"]) for t, r in ok) if ok else None,
+        absent_false_notes=_sum_or_none(_absent_total(r, t["group_status"]) for t, r in ok) if ok else None,
         wall_time_sec=_mean(r.get("wall_time_sec") for _, r in ok),
         peak_rss_mb_max=max((r["peak_rss_mb"] for _, r in ok if r.get("peak_rss_mb") is not None), default=None))
 
@@ -309,7 +320,7 @@ def _compare(tracks: List[dict], mode: str) -> dict:
     per_track, deltas = [], {k: [] for k in ("precision", "recall", "f1")}
     stem_deltas: Dict[str, list] = {}
     absent_off = absent_mode = 0
-    absent_measured = False
+    absent_measured = absent_missing = per_stem_unscored = False
     extra_times, cold_times, extra_rams, sdr_deltas = [], [], [], []
     for t in paired:
         off, trial, cold = t["runs"]["off"], t["runs"][mode], t["runs"].get("off_cold")
@@ -319,14 +330,19 @@ def _compare(tracks: List[dict], mode: str) -> dict:
             row[f"delta_{k}"] = None if a is None or b is None else b - a
             if row[f"delta_{k}"] is not None:
                 deltas[k].append(row[f"delta_{k}"])
+        if off.get("per_stem_f1") is None or trial.get("per_stem_f1") is None:
+            per_stem_unscored = True
         for stem, b in (trial.get("per_stem_f1") or {}).items():
             a = (off.get("per_stem_f1") or {}).get(stem)
             if a is not None and b is not None:
                 stem_deltas.setdefault(stem, []).append(b - a)
         if any(s == ABSENT for s in t["group_status"].values()):
-            absent_measured = True
-            absent_off += _absent_total(off, t["group_status"])
-            absent_mode += _absent_total(trial, t["group_status"])
+            a, b = _absent_total(off, t["group_status"]), _absent_total(trial, t["group_status"])
+            if a is None or b is None:
+                absent_missing = True
+            else:
+                absent_measured = True
+                absent_off, absent_mode = absent_off + a, absent_mode + b
         row["extra_time_sec"] = row["extra_ram_mb"] = None
         if _ok(cold) and None not in (cold.get("wall_time_sec"), off.get("wall_time_sec"), trial.get("wall_time_sec")):
             row["extra_time_sec"] = trial["wall_time_sec"] - off["wall_time_sec"]
@@ -344,8 +360,9 @@ def _compare(tracks: List[dict], mode: str) -> dict:
                         recall_drops_over_0_02=sum(d < -RECALL_DROP_LIMIT - _EPS for d in deltas["recall"])) if f1 else None
     mean = {k: _mean(v) for k, v in deltas.items()}
     stem_means = {s: statistics.mean(v) for s, v in stem_deltas.items()}
-    worst_stem = min(stem_means, key=stem_means.get) if stem_means else None
-    reduction = (absent_off - absent_mode) / absent_off if absent_measured and absent_off else None
+    worst_stem = min(stem_means, key=stem_means.get) if stem_means and not per_stem_unscored else None
+    reduction = ((absent_off - absent_mode) / absent_off
+                 if absent_measured and absent_off and not absent_missing else None)
     time_ratio = sum(extra_times) / sum(cold_times) if cold_times and sum(cold_times) > 0 else None
     ram = max(extra_rams) if extra_rams else None
     sdr = max(sdr_deltas) if sdr_deltas else None

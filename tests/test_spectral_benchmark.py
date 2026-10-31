@@ -190,3 +190,41 @@ def test_main_wires_default_and_ab_paths(tmp_path, monkeypatch, extra):
         expected = [t for t in ids if bench.track_in_split(t, 'test')]
         assert [e['track_id'] for e in report['reference_tracks']] == expected
         assert report['spectral_validation']['comparisons']['filter']['acceptance']['recall']['status'] == 'PASS'
+
+
+def test_absent_reduction_needs_measured_counts_in_both_runs():
+    def acc(off_stems, trial_stems):
+        tracks = [_track('a', off=_run(stems=off_stems), filter=_run(stems=trial_stems))]
+        return bench.summarize_spectral_ab(tracks, ['off', 'filter'])['comparisons']['filter']['acceptance']
+    measured = {'bass': {'notes_count': 10}, 'vocals': {'notes_count': 10}}
+    missing = {'bass': {'notes_count': 10}}
+    assert acc(measured, missing)['absent_false_notes']['status'] == 'NOT_MEASURED'
+    assert acc(missing, measured)['absent_false_notes']['status'] == 'NOT_MEASURED'
+    assert acc(measured, {'bass': {'notes_count': 10}, 'vocals': {'notes_count': None}})[
+        'absent_false_notes']['status'] == 'NOT_MEASURED'
+    assert acc(measured, {'bass': {'notes_count': 10}, 'vocals': {'notes_count': 8}})[
+        'absent_false_notes']['status'] == 'PASS'
+    tracks = [_track('a', filter=_run(stems={'bass': {'notes_count': 10}, 'vocals': {'notes_count': 0}})),
+              _track('b', filter=_run(stems=missing))]
+    acc2 = bench.summarize_spectral_ab(tracks, ['off', 'filter'])['comparisons']['filter']['acceptance']
+    assert acc2['absent_false_notes']['status'] == 'NOT_MEASURED'
+
+
+def test_six_stem_worker_does_not_score_per_stem(tmp_path, monkeypatch):
+    monkeypatch.delenv('MUSIC_RE_BENCH_STUB', raising=False)
+    monkeypatch.setattr(bench, 'run_pipeline', lambda *a, **k: {})
+    monkeypatch.setattr(bench, 'evaluate_quality', lambda *a, **k: {'transcription_metrics': {}})
+
+    def never(*a, **k):
+        raise AssertionError('six-stem output must not be scored against grouped references')
+    monkeypatch.setattr(bench, '_per_stem_f1', never)
+    result = bench.worker_main({'mix_path': 'm.wav', 'cache_root': str(tmp_path), 'mode': 'filter',
+                                'six_stems': True, 'ground_truth_midi': 'g.mid'})
+    assert result['error'] is None and result['per_stem_f1'] is None and 'six-stem' in result['per_stem_error']
+
+
+def test_per_stem_not_measured_when_any_paired_run_unscored():
+    unscored = dict(_run(), per_stem_f1=None)
+    tracks = [_track('a', filter=_run(per_stem={'bass': .8})), _track('b', off=unscored, filter=unscored)]
+    acc = bench.summarize_spectral_ab(tracks, ['off', 'filter'])['comparisons']['filter']['acceptance']
+    assert acc['per_stem']['status'] == 'NOT_MEASURED'
