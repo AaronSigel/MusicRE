@@ -96,8 +96,18 @@ def compute_stft(
         freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
         return freqs, np.zeros(0, dtype=np.float32), np.zeros((len(freqs), 0), dtype=np.float32)
 
+    return _compute_stft(y, sr, n_fft, hop_length, 'hann')
+
+
+def _compute_stft(
+    y: np.ndarray, sr: int, n_fft: int, hop_length: int, window: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Internal STFT allowing composite extraction to honor configured windows."""
+    if y.size == 0:
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft).astype(np.float32)
+        return freqs, np.zeros(0, dtype=np.float32), np.zeros((len(freqs), 0), dtype=np.float32)
     y = _pad_for_fft(y, n_fft)
-    stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length, window='hann', center=True)
+    stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length, window=window, center=True)
     mag = np.abs(stft).astype(np.float32)
     freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft).astype(np.float32)
     times = librosa.frames_to_time(np.arange(mag.shape[1]), sr=sr, hop_length=hop_length).astype(np.float32)
@@ -239,10 +249,13 @@ def compute_stem_features(y: np.ndarray, config: SpectralConfig) -> StemSpectral
     y_mono = _to_mono_float32(y)
 
     # STFT
-    stft_freqs, times, stft_mag = compute_stft(
-        y_mono, sr=config.sr, n_fft=config.n_fft, hop_length=config.hop_length
+    stft_freqs, times, stft_mag = _compute_stft(
+        y_mono, sr=config.sr, n_fft=config.n_fft, hop_length=config.hop_length,
+        window=config.window,
     )
-    n_frames = stft_mag.shape[1]
+    n_frames = 1 + y_mono.size // config.hop_length if y_mono.size else 0
+    stft_mag = stft_mag[:, :n_frames]
+    times = times[:n_frames]
 
     # CQT — trim or pad to match STFT frame count
     cqt_mag, cqt_midi = compute_cqt(
@@ -266,8 +279,13 @@ def compute_stem_features(y: np.ndarray, config: SpectralConfig) -> StemSpectral
     elif rms.shape[0] < n_frames:
         rms = np.pad(rms, (0, n_frames - rms.shape[0]))
 
-    # Flux from STFT magnitude
-    flux = compute_spectral_flux(stft_mag)
+    # A shorter centered window limits onset smearing while preserving frame grid.
+    flux_n_fft = min(1024, config.n_fft)
+    _, _, flux_mag = _compute_stft(
+        y_mono, sr=config.sr, n_fft=flux_n_fft, hop_length=config.hop_length,
+        window=config.window,
+    )
+    flux = compute_spectral_flux(flux_mag[:, :n_frames])
 
     return StemSpectralFeatures(
         sr=config.sr,
@@ -305,5 +323,5 @@ def load_mono(path: Union[str, Path], sr: int = 22050) -> np.ndarray:
     data, _ = decode_audio(path, target_sr=sr, normalize_db=None)
     data = np.asarray(data, dtype=np.float32)
     if data.ndim > 1:
-        data = np.mean(data, axis=1 if data.shape[0] > data.shape[1] else 0)
+        data = np.mean(data, axis=1)
     return data.astype(np.float32)

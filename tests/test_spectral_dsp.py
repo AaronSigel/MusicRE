@@ -182,17 +182,13 @@ class TestComputeSpectralFlux:
         flux = compute_spectral_flux(mag)
         assert np.all(flux == 0.0)
 
-    def test_impulse_onset_within_four_hops(self):
-        # STFT center=True with a Hann window causes energy to bleed into
-        # adjacent frames; the flux peak lands within ~3-4 hops of the impulse.
-        from music_re.core.spectral import compute_stft, compute_spectral_flux
-        offset_s = 0.5
+    @pytest.mark.parametrize('offset_s', [0.2, 0.5, 1.1, 1.7])
+    def test_impulse_onset_within_one_hop(self, offset_s):
+        from music_re.core.spectral import compute_stem_features, SpectralConfig
         y = _impulse(offset_s=offset_s)
-        _, times, mag = compute_stft(y)
-        flux = compute_spectral_flux(mag)
-        peak_frame = int(np.argmax(flux))
-        peak_time = times[peak_frame]
-        assert abs(peak_time - offset_s) <= 4 * HOP / SR + 1e-6
+        features = compute_stem_features(y, SpectralConfig())
+        peak_frame = int(np.argmax(features.flux))
+        assert abs(features.times[peak_frame] - offset_s) <= HOP / SR + 1e-6
 
     def test_no_nan(self):
         from music_re.core.spectral import compute_stft, compute_spectral_flux
@@ -293,6 +289,24 @@ class TestStemSpectralFeatures:
 # ---------------------------------------------------------------------------
 
 class TestComputeStemFeatures:
+    @pytest.mark.parametrize('sample_count', [1, 64, 2048, 4097])
+    def test_short_signal_has_original_duration_frame_grid(self, sample_count):
+        from music_re.core.spectral import compute_stem_features, SpectralConfig
+        features = compute_stem_features(np.ones(sample_count, dtype=np.float32), SpectralConfig())
+        expected = 1 + sample_count // HOP
+        assert features.times.shape == (expected,)
+        assert features.stft_mag.shape[1] == expected
+        assert features.cqt_mag.shape[1] == expected
+        assert features.rms.shape == (expected,)
+        assert features.flux.shape == (expected,)
+
+    def test_configured_window_reaches_stft(self):
+        from music_re.core.spectral import compute_stem_features, SpectralConfig
+        y = _sine(440.0, duration_s=0.2)
+        hann = compute_stem_features(y, SpectralConfig(window='hann'))
+        boxcar = compute_stem_features(y, SpectralConfig(window='boxcar'))
+        assert not np.allclose(hann.stft_mag, boxcar.stft_mag)
+
     def test_basic_shapes(self):
         from music_re.core.spectral import compute_stem_features, SpectralConfig
         cfg = SpectralConfig()
@@ -359,3 +373,12 @@ class TestLoadMono:
         sig = inspect.signature(load_mono)
         assert 'path' in sig.parameters
         assert 'sr' in sig.parameters
+
+    def test_decoder_frames_channels_axis_even_when_frames_le_channels(self, monkeypatch):
+        import music_re.core.audio_io
+        from music_re.core.spectral import load_mono
+        monkeypatch.setattr(
+            music_re.core.audio_io, 'decode_audio',
+            lambda *args, **kwargs: (np.array([[1.0, 3.0]], dtype=np.float32), SR),
+        )
+        np.testing.assert_array_equal(load_mono('unused.wav'), np.array([2.0], dtype=np.float32))

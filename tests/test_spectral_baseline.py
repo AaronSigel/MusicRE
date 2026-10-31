@@ -18,3 +18,7 @@ def test_run_pipeline_param_names():
         'file_path', 'workspace', 'six_stems', 'device',
         'profile', 'progress_callback', 'separator_backend',
     ]
+    assert [parameter.default for parameter in inspect.signature(run_pipeline).parameters.values()] == [
+        inspect.Parameter.empty, None, False, 'auto',
+        'balanced', None, 'demucs',
+    ]
