@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,10 @@ def six_stem_env(pipeline_env, monkeypatch):
     return pipeline, ws, source, counts
 
 
+def _report(ws, source):
+    return json.loads(ws.get_spectral_validation_path(source).read_text())
+
+
 def _pitches(path):
     return [n.pitch for i in pretty_midi.PrettyMIDI(str(path)).instruments for n in i.notes]
 
@@ -82,11 +87,12 @@ def test_six_stem_audit_scores_nothing_and_keeps_original(six_stem_env):
     assert set(manifest.spectral_validation['stems']) == set(SIX)
     assert result['active_midis'] == manifest.midis
     assert manifest.validated_midis == {}
+    report = _report(ws, source)
     for name in SIX:
-        stem = manifest.spectral_validation['stems'][name]
+        stem = report['stems'][name]
         assert stem['status'] == ('skipped' if name == 'drums' else 'validated')
         assert all(note['decision'] == ('skipped' if name == 'drums' else 'unscored') for note in stem['notes'])
-    assert len(manifest.spectral_validation['stems']['piano']['notes']) == 2
+    assert len(report['stems']['piano']['notes']) == 2
 
 
 def test_six_stem_filter_rejects_guitar_but_never_piano_or_drums(six_stem_env):
@@ -95,7 +101,7 @@ def test_six_stem_filter_rejects_guitar_but_never_piano_or_drums(six_stem_env):
     manifest = ws.get_manifest(source)
     assert set(manifest.validated_midis) == set(SIX) | {'all_stems'}
     assert set(result['active_midis']) == set(SIX) | {'all_stems'}
-    stems = manifest.spectral_validation['stems']
+    stems = _report(ws, source)['stems']
     guitar = [note['decision'] for note in stems['guitar']['notes']]
     assert guitar[0] != 'reject' and guitar[1] == 'reject'
     assert _pitches(manifest.validated_midis['guitar']) == [57]

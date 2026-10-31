@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from dataclasses import replace
 from types import SimpleNamespace
@@ -140,7 +141,7 @@ def test_filter_export_includes_both_midi_sets_and_report(tonal_pipeline_env, tm
     filtered_notes = [note for instrument in filtered.instruments for note in instrument.notes]
     assert [note.pitch for note in original_notes] == [45, 80]
     assert [note.pitch for note in filtered_notes] == [45]
-    notes = manifest.spectral_validation['stems']['bass']['notes']
+    notes = json.loads((target / 'spectral_validation.json').read_text())['stems']['bass']['notes']
     assert len(filtered_notes) == sum(note['decision'] != 'reject' for note in notes)
 
 
@@ -247,3 +248,63 @@ def test_off_export_has_original_layout(pipeline_env, tmp_path):
     expected |= {f'midis/{name}.mid' for name in names}
     expected |= {f'midis/{name}_raw.mid' for name in names}
     assert files == expected
+
+
+def test_manifest_and_result_hold_summary_without_notes(tonal_pipeline_env):
+    import json
+    from music_re.schemas import SpectralValidationResult
+    pipeline, ws, source, _ = tonal_pipeline_env
+    result = pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    manifest = ws.get_manifest(source)
+    report_path = ws.get_spectral_validation_path(source)
+    summary = manifest.spectral_validation
+    assert result['spectral_validation'] == summary
+    assert set(summary) == {'mode', 'algo_version', 'active_variant', 'report_path', 'stems'}
+    assert summary['mode'] == 'filter'
+    assert summary['active_variant'] == 'validated'
+    assert summary['report_path'] == str(report_path)
+    assert '"notes":' not in json.dumps(summary)
+    bass = summary['stems']['bass']
+    assert set(bass) == {'status', 'counts', 'warnings', 'input_midi_path', 'output_midi_path'}
+    assert bass['input_midi_path'] == manifest.midis['bass']
+    assert bass['output_midi_path'] == manifest.validated_midis['bass']
+    report = SpectralValidationResult.model_validate_json(report_path.read_text())
+    assert len(report.stems['bass'].notes) == 2
+    assert bass['counts'] == report.stems['bass'].counts
+    assert '"notes":' not in ws.get_manifest_path(source).read_text()
+
+
+def test_legacy_manifest_with_full_report_loads_and_exports(tonal_pipeline_env, tmp_path):
+    import json
+    from music_re.core.export import export_bundle, validate_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    manifest_path = ws.get_manifest_path(source)
+    raw = json.loads(manifest_path.read_text())
+    raw['spectral_validation'] = json.loads(ws.get_spectral_validation_path(source).read_text())
+    manifest_path.write_text(json.dumps(raw))
+    assert ws.get_manifest(source).spectral_validation['stems']['bass']['notes']
+    validate_bundle(ws, source)
+    export_bundle(ws, source, tmp_path / 'bundle')
+
+
+def test_export_rejects_validated_midi_disagreeing_with_counts(tonal_pipeline_env):
+    from music_re.core.export import validate_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    manifest = ws.get_manifest(source)
+    manifest.spectral_validation['stems']['bass']['counts'] = {'keep': 2}
+    ws.save_manifest(source, manifest)
+    with pytest.raises(ValueError, match='note count'):
+        validate_bundle(ws, source)
+
+
+def test_stem_report_has_no_failed_status_or_error_field():
+    from pydantic import ValidationError
+    from music_re.schemas import StemValidationReport
+    base = dict(stem='bass', mode='audit', input_midi_path='bass.mid')
+    assert 'error' not in StemValidationReport.model_fields
+    with pytest.raises(ValidationError):
+        StemValidationReport(status='failed', **base)
+    legacy = StemValidationReport.model_validate(dict(base, status='validated', error=None))
+    assert legacy.status == 'validated'

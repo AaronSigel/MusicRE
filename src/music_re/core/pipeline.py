@@ -54,6 +54,14 @@ def _valid(paths, hashes):
         return False
 
 
+def _validation_summary(result, report_path):
+    """Per-note evidence stays in the report file; the manifest keeps only this summary."""
+    stems = {name: {key: stem[key] for key in ('status', 'counts', 'warnings', 'input_midi_path', 'output_midi_path')}
+             for name, stem in result['stems'].items()}
+    return dict(mode=result['mode'], algo_version=result['algo_version'], active_variant=result['active_variant'],
+                report_path=str(report_path), stems=stems)
+
+
 def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', profile='balanced',
                  progress_callback=None, separator_backend='demucs', spectral_validation: str = 'off') -> dict:
     if spectral_validation not in ('off', 'audit', 'filter'):
@@ -268,7 +276,8 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                                                           config=validator_config.to_dict(), stems=reports,
                                                           active_variant='validated' if validated else 'original').model_dump()
                         _atomic_write_json(report_path, result)
-                        ws.update_manifest(source, validated_midis=validated, active_midi_variant=result['active_variant'], spectral_validation=result)
+                        ws.update_manifest(source, validated_midis=validated, active_midi_variant=result['active_variant'],
+                                           spectral_validation=_validation_summary(result, report_path))
                         ws.mark_stage_complete(source, stage)
                         paths = [report_path] + list(validated.values())
                 else:

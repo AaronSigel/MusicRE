@@ -72,8 +72,8 @@ def validate_bundle(workspace, file_path, profile='balanced'):
                 role = Path(destination).stem
                 if role in manifest.transcription_results:
                     if manifest.active_midi_variant == 'validated' and destination.startswith('midis/'):
-                        notes = manifest.spectral_validation['stems'][role]['notes']
-                        expected = sum(note['decision'] != 'reject' for note in notes)
+                        counts = manifest.spectral_validation['stems'][role]['counts']
+                        expected = sum(n for decision, n in counts.items() if decision != 'reject')
                     else:
                         expected = manifest.transcription_results[role]['note_count']
                     if sum(len(i.notes) for i in pm.instruments) != expected:
