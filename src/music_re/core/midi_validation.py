@@ -1,10 +1,133 @@
-"""Per-note evidence extraction from precomputed stem spectral features."""
+"""Per-note spectral evidence and MIDI validation."""
 from __future__ import annotations
 
-import numpy as np
+import dataclasses
+import shutil
+import warnings
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Mapping, Optional
 
-from music_re.core.spectral import StemSpectralFeatures, midi_to_hz
-from music_re.schemas import NoteEvidence
+import numpy as np
+import pretty_midi
+
+from music_re.core.spectral import (SpectralConfig, StemSpectralFeatures,
+                                    compute_stem_features, load_mono, midi_to_hz)
+from music_re.schemas import NoteEvidence, StemValidationReport
+
+
+SPECTRAL_ALGO_VERSION = 'spectral-v1'
+
+
+@dataclass(frozen=True)
+class RoleRule:
+    filter_enabled: bool
+    reject_support: float
+    reject_persistence: float
+    uncertain_support: float
+    uncertain_persistence: float
+
+
+_DEFAULT_ROLES = (
+    ('bass', RoleRule(True, .10, .20, .10, .20)),
+    ('guitar', RoleRule(True, .10, .20, .10, .20)),
+    ('other', RoleRule(True, .06, .10, .10, .20)),
+    ('piano', RoleRule(False, .20, .20, .45, .50)),
+    ('vocals', RoleRule(False, .20, .20, .45, .50)),
+)
+
+
+@dataclass(frozen=True)
+class SpectralValidatorConfig:
+    spectral: SpectralConfig = SpectralConfig()
+    roles: tuple[tuple[str, RoleRule], ...] | Mapping[str, RoleRule] = _DEFAULT_ROLES
+
+    def __post_init__(self):
+        entries = tuple(sorted(self.roles.items())) if isinstance(self.roles, Mapping) else tuple(self.roles)
+        object.__setattr__(self, 'roles', entries)
+
+    def rule_for(self, stem: str) -> Optional[RoleRule]:
+        return dict(self.roles).get(stem)
+
+    def to_dict(self) -> dict:
+        return {'spectral': self.spectral.to_dict(), 'roles': {
+            name: dataclasses.asdict(rule) for name, rule in sorted(self.roles)
+        }}
+
+
+class SpectralMidiValidator:
+    def __init__(self, config: SpectralValidatorConfig = SpectralValidatorConfig()):
+        self.config = config
+
+    def validate(self, audio_path, midi_path, stem_name: str,
+                 mode: Literal['audit', 'filter'], out_midi_path=None) -> StemValidationReport:
+        if mode not in ('audit', 'filter'):
+            raise ValueError("mode must be 'audit' or 'filter'")
+        if mode == 'filter':
+            if out_midi_path is None:
+                raise ValueError('filter mode requires out_midi_path')
+            if Path(out_midi_path).resolve() == Path(midi_path).resolve():
+                raise ValueError('out_midi_path must differ from midi_path')
+        midi = pretty_midi.PrettyMIDI(str(midi_path))
+        instruments = midi.instruments
+        notes_flat = [(inst, note) for inst in instruments for note in inst.notes]
+        y = load_mono(audio_path, self.config.spectral.sr)
+        rule = self.config.rule_for(stem_name)
+        if stem_name == 'drums':
+            status, decision = 'skipped', 'skipped'
+        elif rule is None:
+            status, decision = 'unsupported', 'unsupported'
+            warning = f"Unsupported stem '{stem_name}'; MIDI passed through."
+            warnings.warn(warning, UserWarning)
+        else:
+            status, decision = 'validated', 'unscored'
+        if mode == 'audit' or (rule is None or not rule.filter_enabled or stem_name == 'drums'):
+            if mode == 'filter':
+                shutil.copyfile(midi_path, out_midi_path)
+            if mode == 'audit' and rule is not None:
+                features = compute_stem_features(y, self.config.spectral)
+                evidence = [compute_note_evidence(features, n.pitch, n.start, n.end, n.velocity)
+                            for _, n in notes_flat]
+                for item in evidence:
+                    item.decision = 'unscored'
+            else:
+                evidence = [NoteEvidence(pitch=n.pitch, start_sec=n.start, end_sec=n.end,
+                                         velocity=n.velocity, harmonic_support=0, spectral_contrast=0,
+                                         temporal_persistence=0, onset_agreement=0, leakage=0,
+                                         decision=decision) for _, n in notes_flat]
+            return self._report(stem_name, mode, status, midi_path,
+                                out_midi_path if mode == 'filter' else None, evidence,
+                                [warning] if rule is None and stem_name != 'drums' else [])
+        features = compute_stem_features(y, self.config.spectral)
+        evidence = []
+        rejected = set()
+        for inst in instruments:
+            for note in inst.notes:
+                item = compute_note_evidence(features, note.pitch, note.start, note.end, note.velocity)
+                if (item.harmonic_support < rule.reject_support and
+                        item.temporal_persistence < rule.reject_persistence):
+                    item.decision = 'reject'
+                    rejected.add(id(note))
+                elif (item.harmonic_support < rule.uncertain_support or
+                      item.temporal_persistence < rule.uncertain_persistence):
+                    item.decision = 'uncertain'
+                else:
+                    item.decision = 'keep'
+                evidence.append(item)
+        for inst in instruments:
+            inst.notes = [note for note in inst.notes if id(note) not in rejected]
+        midi.write(str(out_midi_path))
+        return self._report(stem_name, mode, status, midi_path, out_midi_path, evidence, [])
+
+    @staticmethod
+    def _report(stem, mode, status, input_path, output_path, notes, warnings_list):
+        counts = {}
+        for note in notes:
+            counts[note.decision] = counts.get(note.decision, 0) + 1
+        return StemValidationReport(stem=stem, mode=mode, status=status,
+                                    input_midi_path=str(input_path),
+                                    output_midi_path=str(output_path) if output_path is not None else None,
+                                    notes=notes, counts=counts, warnings=warnings_list)
 
 
 def _bounded(value: float) -> float:
