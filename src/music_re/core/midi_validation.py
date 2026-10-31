@@ -19,6 +19,15 @@ from music_re.schemas import NoteEvidence, StemValidationReport
 SPECTRAL_ALGO_VERSION = 'spectral-v1'
 
 
+# Order of the inputs to the calibrated note score (scripts/calibrate_spectral.py).
+SCORE_FEATURES = ('harmonic_support', 'spectral_contrast', 'temporal_persistence',
+                  'onset_agreement', 'leakage', 'log_duration')
+_MIN_DURATION_SEC = 1e-3
+# Notes without measurable evidence: the score is reported but never rejects them on its own.
+_NO_EVIDENCE_REASONS = frozenset({'out_of_range', 'invalid_duration'})
+_SCORE_FIELDS = ('score_weights', 'score_bias', 'score_mean', 'score_scale', 'reject_below', 'uncertain_below')
+
+
 @dataclass(frozen=True)
 class RoleRule:
     filter_enabled: bool
@@ -26,6 +35,70 @@ class RoleRule:
     reject_persistence: float
     uncertain_support: float
     uncertain_persistence: float
+    # Optional calibrated logistic score; when set, filter decisions use it instead of the thresholds above.
+    score_weights: tuple[float, ...] | None = None
+    score_bias: float | None = None
+    score_mean: tuple[float, ...] | None = None
+    score_scale: tuple[float, ...] | None = None
+    reject_below: float | None = None
+    uncertain_below: float | None = None
+
+    def __post_init__(self):
+        values = [getattr(self, name) for name in _SCORE_FIELDS]
+        if all(v is None for v in values):
+            return
+        if any(v is None for v in values):
+            raise ValueError(f'score parameters must be all set or all None: {_SCORE_FIELDS}')
+        for name in ('score_weights', 'score_mean', 'score_scale'):
+            vector = tuple(float(v) for v in getattr(self, name))
+            if len(vector) != len(SCORE_FEATURES) or not all(np.isfinite(vector)):
+                raise ValueError(f'{name} needs {len(SCORE_FEATURES)} finite values')
+            object.__setattr__(self, name, vector)
+        if any(v <= 0 for v in self.score_scale):
+            raise ValueError('score_scale values must be positive')
+        for name in ('score_bias', 'reject_below', 'uncertain_below'):
+            value = float(getattr(self, name))
+            if not np.isfinite(value):
+                raise ValueError(f'{name} must be finite')
+            object.__setattr__(self, name, value)
+        if not 0.0 <= self.reject_below <= self.uncertain_below <= 1.0:
+            raise ValueError('need 0 <= reject_below <= uncertain_below <= 1')
+
+    @property
+    def has_score(self) -> bool:
+        return self.score_weights is not None
+
+    def to_dict(self) -> dict:
+        data = dataclasses.asdict(self)
+        if not self.has_score:
+            return {k: v for k, v in data.items() if k not in _SCORE_FIELDS}
+        return {k: list(v) if isinstance(v, tuple) else v for k, v in data.items()}
+
+
+def score_features(item: NoteEvidence) -> np.ndarray:
+    duration = max(item.end_sec - item.start_sec, _MIN_DURATION_SEC)
+    return np.array([item.harmonic_support, item.spectral_contrast, item.temporal_persistence,
+                     item.onset_agreement, item.leakage, np.log(duration)], dtype=np.float64)
+
+
+def note_score(rule: RoleRule, item: NoteEvidence) -> Optional[float]:
+    """Calibrated probability-like score in [0, 1]; None when the role has no score parameters."""
+    if not rule.has_score:
+        return None
+    x = np.nan_to_num(score_features(item), nan=0.0, posinf=0.0, neginf=0.0)
+    z = (x - np.asarray(rule.score_mean)) / np.asarray(rule.score_scale)
+    logit = float(np.clip(np.dot(rule.score_weights, z) + rule.score_bias, -500.0, 500.0))
+    return float(1.0 / (1.0 + np.exp(-logit)))
+
+
+def score_decision(rule: RoleRule, score: float, reason: Optional[str]) -> str:
+    if reason in _NO_EVIDENCE_REASONS:
+        return 'uncertain'
+    if score < rule.reject_below:
+        return 'reject'
+    if score < rule.uncertain_below:
+        return 'uncertain'
+    return 'keep'
 
 
 _DEFAULT_ROLES = (
@@ -51,7 +124,7 @@ class SpectralValidatorConfig:
 
     def to_dict(self) -> dict:
         return {'spectral': self.spectral.to_dict(), 'roles': {
-            name: dataclasses.asdict(rule) for name, rule in sorted(self.roles)
+            name: rule.to_dict() for name, rule in sorted(self.roles)
         }}
 
 
@@ -89,6 +162,7 @@ class SpectralMidiValidator:
                 evidence = [compute_note_evidence(features, n.pitch, n.start, n.end, n.velocity)
                             for _, n in notes_flat]
                 for item in evidence:
+                    item.note_score = note_score(rule, item)
                     item.decision = 'unscored'
             else:
                 evidence = [NoteEvidence(pitch=n.pitch, start_sec=n.start, end_sec=n.end,
@@ -105,15 +179,19 @@ class SpectralMidiValidator:
         for inst in instruments:
             for note in inst.notes:
                 item = compute_note_evidence(features, note.pitch, note.start, note.end, note.velocity)
-                if (item.harmonic_support < rule.reject_support and
+                if rule.has_score:
+                    item.note_score = note_score(rule, item)
+                    item.decision = score_decision(rule, item.note_score, item.reason)
+                elif (item.harmonic_support < rule.reject_support and
                         item.temporal_persistence < rule.reject_persistence):
                     item.decision = 'reject'
-                    rejected.add(id(note))
                 elif (item.harmonic_support < rule.uncertain_support or
                       item.temporal_persistence < rule.uncertain_persistence):
                     item.decision = 'uncertain'
                 else:
                     item.decision = 'keep'
+                if item.decision == 'reject':
+                    rejected.add(id(note))
                 evidence.append(item)
         for inst in instruments:
             inst.notes = [note for note in inst.notes if id(note) not in rejected]
