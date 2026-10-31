@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 import music_re.cli as cli
 import music_re.mcp_server as server
+from test_shared_pipeline import pipeline_env
 
 
 runner = CliRunner()
@@ -79,3 +80,20 @@ def test_mcp_passes_spectral_mode(monkeypatch, tmp_path, mode, expected):
     kwargs = {} if mode == 'default' else {'spectral_validation': mode}
     asyncio.run(server.deconstruct_full_pipeline(str(tmp_path / 'audio.wav'), **kwargs))
     assert captured['spectral_validation'] == expected
+
+
+def test_mcp_invalid_mode_raises_before_writing_manifest(tmp_path):
+    source = tmp_path / 'audio.wav'
+    source.write_bytes(b'')
+    cache = tmp_path / 'cache'
+    with pytest.raises(ValueError, match='spectral_validation'):
+        asyncio.run(server.deconstruct_full_pipeline(str(source), cache_root=str(cache), spectral_validation='invalid'))
+    assert not list(cache.rglob('manifest.json'))
+
+
+def test_mcp_uppercase_mode_runs_like_cli(pipeline_env):
+    pipeline, ws, source, _ = pipeline_env
+    result = asyncio.run(server.deconstruct_full_pipeline(str(source), cache_root=str(ws.cache_root),
+                                                          spectral_validation='AUDIT'))
+    assert result['spectral_validation']['mode'] == 'audit'
+    assert ws.get_manifest(source).spectral_validation['mode'] == 'audit'

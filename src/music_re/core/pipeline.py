@@ -64,6 +64,7 @@ def _validation_summary(result, report_path):
 
 def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', profile='balanced',
                  progress_callback=None, separator_backend='demucs', spectral_validation: str = 'off') -> dict:
+    spectral_validation = str(spectral_validation).strip().lower()
     if spectral_validation not in ('off', 'audit', 'filter'):
         raise ValueError('invalid spectral_validation mode')
     settings = resolve_profile(profile, six_stems)

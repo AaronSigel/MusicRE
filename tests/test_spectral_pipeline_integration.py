@@ -299,6 +299,13 @@ def test_export_rejects_validated_midi_disagreeing_with_counts(tonal_pipeline_en
         validate_bundle(ws, source)
 
 
+@pytest.mark.parametrize('mode', ['AUDIT', ' audit '])
+def test_run_pipeline_normalises_mode(pipeline_env, mode):
+    pipeline, ws, source, _ = pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation=mode)
+    assert ws.get_manifest(source).spectral_validation['mode'] == 'audit'
+
+
 def test_stem_report_has_no_failed_status_or_error_field():
     from pydantic import ValidationError
     from music_re.schemas import StemValidationReport
