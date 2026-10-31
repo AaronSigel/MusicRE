@@ -190,6 +190,17 @@ def test_prepare_track_corrects_bass_octaves_per_source(tmp_path):
     assert sorted(note.pitch for note in reference.instruments[0].notes) == [48] * 8 + [60] * 8
 
 
+def test_prepare_track_rejects_implausible_source_octave_shift(tmp_path, monkeypatch):
+    track_dir = _write_fake_slakh_track(tmp_path / "Track00023", stems=[("S10", "Bass", False, 33)])
+    monkeypatch.setattr("scripts.slakh_mapping.estimate_octave_shift",
+                        lambda *a: (-36, {"agreement": .71, "measured": 10, "histogram": {-36: 7, -12: 3}}))
+    result = prepare_track(track_dir, tmp_path / "prepared-implausible")
+    reference = pretty_midi.PrettyMIDI(result["ground_truth_midi_path"])
+    assert result["octave_shift_by_source"]["bass"]["S10"] == 0
+    assert reference.instruments[0].notes[0].pitch == 60
+    assert any("S10" in warning and "-36" in warning for warning in result["warnings"])
+
+
 def test_prepare_track_handles_missing_stem_audio_without_crashing(tmp_path):
     # Review I5: Slakh's metadata.yaml "audio_rendered" flag is unreliable
     # in practice (BabySlakh Track00020 marks every stem False yet ships

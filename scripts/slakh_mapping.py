@@ -45,6 +45,7 @@ GROUPS = ("vocals", "drums", "bass", "other")
 # Slakh stems and their mix are rendered from the same MIDI at the same
 # sample rate; any larger gap is a real desync, not rounding.
 ALIGNMENT_TOLERANCE_SEC = 0.05
+ALLOWED_OCTAVE_SHIFTS = frozenset({-24, -12, 0, 12})
 
 
 def estimate_octave_shift(audio: np.ndarray, sr: int, notes: list[pretty_midi.Note]) -> tuple[int, dict]:
@@ -215,6 +216,9 @@ def prepare_track(track_dir: Path, out_dir: Path) -> dict:
                 diagnostics = {"measured": 0, "agreement": 0.0, "histogram": {}}
                 if y_mono is not None and source_notes:
                     shift, diagnostics = estimate_octave_shift(y_mono, sr, source_notes)
+                if shift not in ALLOWED_OCTAVE_SHIFTS:
+                    warnings.append(f"{stem_id} (bass): implausible octave shift {shift:+d} semitones; ignored")
+                    shift = 0
                 octave_shift_by_source[group][stem_id] = shift
                 if shift:
                     for note in source_notes:
