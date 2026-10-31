@@ -99,6 +99,15 @@ def validate_bundle(workspace, file_path, profile='balanced'):
     return manifest, {name: Path(path) for name, path in files.items()}
 
 
+def _portable_spectral(data, validated):
+    """Rewrite workspace MIDI paths in a spectral validation summary or report to bundle-relative ones."""
+    data = dict(data, stems={name: dict(stem) for name, stem in data.get('stems', {}).items()})
+    for name, stem in data['stems'].items():
+        stem['input_midi_path'] = f"{'midis_original' if validated else 'midis'}/{name}.mid"
+        stem['output_midi_path'] = f'midis/{name}.mid' if validated and stem.get('output_midi_path') else None
+    return data
+
+
 def export_bundle(workspace, file_path, target_path, profile='balanced', archive=False, export_dawproject: bool = False) -> Path:
     source = Path(file_path).resolve()
     target = Path(target_path).resolve()
@@ -138,9 +147,16 @@ def export_bundle(workspace, file_path, target_path, profile='balanced', archive
         portable['runtime']['source_input_file'] = portable['input_file']
         portable['input_file'] = source.name
         portable['stems'] = {name: f'stems/{name}.wav' for name in manifest.stems}
-        portable['midis'] = {name: f'midis/{name}.mid' for name in manifest.midis}
-        if manifest.active_midi_variant == 'validated':
-            portable['validated_midis'] = dict(portable['midis'])
+        validated = manifest.active_midi_variant == 'validated'
+        portable['midis'] = {name: f"{'midis_original' if validated else 'midis'}/{name}.mid" for name in manifest.midis}
+        if validated:
+            portable['validated_midis'] = {name: f'midis/{name}.mid' for name in manifest.validated_midis}
+        if portable.get('spectral_validation') is not None:
+            portable['spectral_validation'] = _portable_spectral(portable['spectral_validation'], validated)
+            portable['spectral_validation']['report_path'] = 'spectral_validation.json'
+            report = staged / 'spectral_validation.json'
+            report.write_text(json.dumps(_portable_spectral(json.loads(report.read_text()), validated),
+                                         indent=2, allow_nan=False), encoding='utf-8')
         if export_dawproject:
             portable['dawproject'] = f'{source.stem}.dawproject'
         for name, result in portable['transcription_results'].items():

@@ -315,3 +315,35 @@ def test_stem_report_has_no_failed_status_or_error_field():
         StemValidationReport(status='failed', **base)
     legacy = StemValidationReport.model_validate(dict(base, status='validated', error=None))
     assert legacy.status == 'validated'
+
+
+def test_filter_portable_manifest_maps_both_midi_sets(tonal_pipeline_env, tmp_path):
+    from music_re.core.export import export_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    target = export_bundle(ws, source, tmp_path / 'bundle')
+    portable = json.loads((target / 'manifest.json').read_text())
+    names = set(ws.get_manifest(source).midis)
+    assert portable['midis'] == {name: f'midis_original/{name}.mid' for name in names}
+    assert portable['validated_midis'] == {name: f'midis/{name}.mid' for name in names}
+    assert all((target / path).is_file() for path in [*portable['midis'].values(), *portable['validated_midis'].values()])
+
+
+@pytest.mark.parametrize('mode', ['audit', 'filter'])
+def test_portable_spectral_paths_are_bundle_relative(tonal_pipeline_env, tmp_path, mode):
+    from music_re.core.export import export_bundle
+    pipeline, ws, source, _ = tonal_pipeline_env
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation=mode)
+    target = export_bundle(ws, source, tmp_path / 'bundle')
+    portable = json.loads((target / 'manifest.json').read_text())
+    summary = portable['spectral_validation']
+    report = json.loads((target / 'spectral_validation.json').read_text())
+    local = str(ws.cache_root)
+    assert local not in json.dumps(summary) and local not in json.dumps(report)
+    assert summary['report_path'] == 'spectral_validation.json'
+    original_dir = 'midis_original' if mode == 'filter' else 'midis'
+    for name in ('vocals', 'drums', 'bass', 'other'):
+        for stem in (summary['stems'][name], report['stems'][name]):
+            assert stem['input_midi_path'] == f'{original_dir}/{name}.mid'
+            assert stem['output_midi_path'] == (f'midis/{name}.mid' if mode == 'filter' else None)
+    assert portable['artifact_hashes']['bundle']['spectral_validation.json'] == pipeline.compute_file_content_hash(target / 'spectral_validation.json')
