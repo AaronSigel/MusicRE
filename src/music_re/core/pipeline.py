@@ -264,7 +264,8 @@ def run_pipeline(file_path, workspace=None, six_stems=False, device='auto', prof
                             if name == 'all_stems':
                                 continue
                             output = midi_dir / f'{name}.mid' if spectral_validation == 'filter' else None
-                            reports[name] = validator.validate(manifest.stems[name], midi, name, spectral_validation, out_midi_path=output)
+                            reports[name] = validator.validate(manifest.stems[name], midi, name, spectral_validation,
+                                                             out_midi_path=output, mix_audio_path=source)
                             if output is not None:
                                 validated[name] = str(output)
                         if spectral_validation == 'filter':

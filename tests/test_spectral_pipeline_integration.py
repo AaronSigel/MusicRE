@@ -347,3 +347,39 @@ def test_portable_spectral_paths_are_bundle_relative(tonal_pipeline_env, tmp_pat
             assert stem['input_midi_path'] == f'{original_dir}/{name}.mid'
             assert stem['output_midi_path'] == (f'midis/{name}.mid' if mode == 'filter' else None)
     assert portable['artifact_hashes']['bundle']['spectral_validation.json'] == pipeline.compute_file_content_hash(target / 'spectral_validation.json')
+
+
+def test_pipeline_passes_source_mix_to_validator(pipeline_env, monkeypatch):
+    pipeline, ws, source, _ = pipeline_env
+    calls = []
+    original = pipeline.SpectralMidiValidator.validate
+
+    def spy(self, *args, **kwargs):
+        calls.append(kwargs.get('mix_audio_path'))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline.SpectralMidiValidator, 'validate', spy)
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='audit')
+    assert calls and all(Path(c) == Path(source).resolve() for c in calls)
+
+
+def test_filter_export_with_absent_stem_validates(tonal_pipeline_env, monkeypatch, tmp_path):
+    from music_re.core.export import export_bundle, validate_bundle
+    from music_re.core.midi_validation import PresenceRule, SpectralValidatorConfig
+    pipeline, ws, source, _ = tonal_pipeline_env
+    sr = 22050
+    sf.write(source, .5 * np.sin(2 * np.pi * 220 * np.arange(sr) / sr), sr)
+    monkeypatch.setattr(pipeline, 'SpectralValidatorConfig',
+                        lambda: SpectralValidatorConfig(presence={'bass': PresenceRule(200.0, 2.0)}))
+    pipeline.run_pipeline(source, workspace=ws, spectral_validation='filter')
+    manifest = ws.get_manifest(source)
+    report = json.loads(ws.get_spectral_validation_path(source).read_text())
+    assert report['stems']['bass']['status'] == 'absent'
+    assert report['stems']['bass']['counts'] == {'reject': 2}
+    assert manifest.spectral_validation['stems']['bass']['status'] == 'absent'
+    bass = pretty_midi.PrettyMIDI(manifest.validated_midis['bass'])
+    assert sum(len(i.notes) for i in bass.instruments) == 0
+    pretty_midi.PrettyMIDI(manifest.validated_midis['all_stems'])
+    validate_bundle(ws, source)
+    target = export_bundle(ws, source, tmp_path / 'bundle')
+    assert (target / 'midis' / 'bass.mid').is_file()
