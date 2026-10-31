@@ -79,6 +79,14 @@ def detect_chords_for_bars(
             y_mono = np.mean(y_mono, axis=1)
 
     results: List[Dict[str, Any]] = []
+    chroma_all = None
+    if y_mono.size:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                chroma_all = librosa.feature.chroma_cqt(y=y_mono, sr=sr)
+        except Exception:
+            pass
 
     for i, bar in enumerate(bars):
         start_sec, end_sec = _extract_bar_bounds(bar)
@@ -114,12 +122,10 @@ def detect_chords_for_bars(
 
         # Extract chroma
         chroma = None
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                chroma = librosa.feature.chroma_cqt(y=y_slice, sr=sr)
-        except Exception:
-            pass
+        if chroma_all is not None:
+            first = (start_samp + 511) // 512
+            last = (end_samp + 511) // 512
+            chroma = chroma_all[:, first:last]
 
         if chroma is None or chroma.size == 0:
             try:
