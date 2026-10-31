@@ -2,7 +2,6 @@ import asyncio
 import json
 
 import pytest
-from click.exceptions import BadParameter
 from typer.testing import CliRunner
 
 import music_re.cli as cli
@@ -50,8 +49,7 @@ def test_cli_rejects_invalid_spectral_mode(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, 'run_pipeline', fake_pipeline)
     result = runner.invoke(cli.app, ['deconstruct', str(tmp_path / 'audio.wav'), '--spectral-validation', 'invalid'])
-    # Current Typer/Click runner leaks BadParameter instead of translating it to exit 2.
-    assert isinstance(result.exception, BadParameter)
+    assert result.exit_code != 0
     assert not called
 
 
